@@ -3,7 +3,7 @@ import { flattenError, type ZodType } from 'zod';
 
 import { AppError } from '../errors/app-error.js';
 
-export type ValidationSource = 'body' | 'query' | 'params';
+export type ValidationSource = 'body' | 'query' | 'params' | 'headers';
 
 /**
  * Validates and parses one request slot with a Zod schema, replacing the raw

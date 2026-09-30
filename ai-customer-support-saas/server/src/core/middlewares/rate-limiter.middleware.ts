@@ -1,5 +1,6 @@
 import { rateLimit ,type  Options,type  RateLimitRequestHandler } from 'express-rate-limit';
 
+import { env } from '../../config/env.config.js';
 import { AppError } from '../errors/app-error.js';
 import { logger } from '../logger/logger.js';
 
@@ -15,8 +16,8 @@ const handleLimitExceeded: Options['handler'] = (_req, _res, next, options) => {
  */
 export function createRateLimiter(options: Partial<Options> = {}): RateLimitRequestHandler {
   return rateLimit({
-    windowMs: 60_000,
-    limit: 120,
+    windowMs: env.RATE_LIMIT_WINDOW_MS,
+    limit: env.RATE_LIMIT_MAX_REQUESTS,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
     handler: handleLimitExceeded,

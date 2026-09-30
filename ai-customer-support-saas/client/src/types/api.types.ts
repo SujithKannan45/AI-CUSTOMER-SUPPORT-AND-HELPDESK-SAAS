@@ -11,13 +11,22 @@ export interface ApiErrorPayload {
 }
 
 export interface HealthCheckResponse {
+  success: true;
   status: 'ok';
+  timestamp: string;
+  services: {
+    api: 'up';
+  };
 }
 
 export interface HealthReadinessResponse {
+  success: true;
   status: 'ok' | 'degraded';
-  checks: {
-    database: 'ok' | 'unavailable';
+  timestamp: string;
+  services: {
+    api: 'up';
+    database: 'up' | 'down';
   };
+  environment: string;
   requestId?: string;
 }

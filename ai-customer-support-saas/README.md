@@ -42,7 +42,7 @@ ai-customer-support-saas/
 ├── server/                 # REST API
 │   └── src/
 │       ├── config/         # Validated env config (Zod) — no process.env elsewhere
-│       ├── core/           # errors/ logger/ middlewares/ utils/
+│       ├── core/           # errors/ http/ lifecycle/ logger/ middlewares/ utils/
 │       ├── database/       # Mongo connection lifecycle
 │       ├── modules/        # Feature modules (health implemented; seams for ai/documents)
 │       ├── routes/         # Versioned API assembly point (/api/v1)
@@ -52,6 +52,7 @@ ai-customer-support-saas/
 │       └── server.ts       # HTTP listener + graceful shutdown
 ├── docker/                 # Dockerfiles + nginx
 ├── docs/                   # architecture.md
+├── scripts/                # dev-db.ts (Docker-less Mongo), verify-shutdown.ts
 ├── docker-compose.yml      # Local MongoDB (Redis commented for the jobs phase)
 └── package.json            # npm workspaces root
 ```
@@ -111,6 +112,7 @@ npm run dev
 | `npm run lint` | ESLint (typed rules, zero warnings allowed) |
 | `npm run verify` | typecheck + lint + build |
 | `npm run db:up` / `npm run db:down` | Start/stop local MongoDB |
+| `npm run db:memory` | Fallback in-memory Mongo when Docker is unavailable |
 
 ## Security posture (foundation)
 

@@ -24,7 +24,7 @@ export function ClientStatusCard(): JSX.Element {
       .then((response) => {
         if (cancelled) return;
         setDetail(response);
-        setStatus(response.checks.database === 'ok' ? 'ok' : 'degraded');
+        setStatus(response.services.database === 'up' ? 'ok' : 'degraded');
       })
       .catch(() => {
         if (cancelled) return;
@@ -56,7 +56,7 @@ export function ClientStatusCard(): JSX.Element {
         <div>
           <CardTitle>{label[status]}</CardTitle>
           <p className="mt-0.5 text-xs text-ink-500">
-            {detail ? `Database: ${detail.checks.database}` : 'GET /health/ready'}
+            {detail ? `Database: ${detail.services.database}` : 'GET /health/ready'}
           </p>
         </div>
       </CardBody>

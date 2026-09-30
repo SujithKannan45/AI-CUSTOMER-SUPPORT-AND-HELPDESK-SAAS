@@ -39,11 +39,38 @@ function isMongoDuplicateKeyError(error: unknown): error is MongoDuplicateKeyErr
   );
 }
 
+interface BodyParserError extends Error {
+  type?: string;
+  statusCode?: number;
+}
+
+/** Maps body-parser failures (malformed JSON, oversized payloads) to client errors. */
+function normalizeBodyParserError(error: BodyParserError): NormalizedError | null {
+  if (error.type === 'entity.parse.failed') {
+    return { statusCode: 400, code: 'INVALID_JSON', message: 'Request body contains malformed JSON' };
+  }
+  if (error.type === 'entity.too.large') {
+    return { statusCode: 413, code: 'PAYLOAD_TOO_LARGE', message: 'Request body exceeds the allowed size' };
+  }
+  return null;
+}
+
 /**
  * Maps any thrown value onto the application's error contract. Unknown errors
  * become opaque 500s so internals never leak to clients.
  */
 function normalizeError(error: unknown): NormalizedError {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'type' in error &&
+    typeof (error as BodyParserError).type === 'string' &&
+    error instanceof Error
+  ) {
+    const bodyParserResult = normalizeBodyParserError(error as BodyParserError);
+    if (bodyParserResult !== null) return bodyParserResult;
+  }
+
   if (error instanceof AppError) {
     return { statusCode: error.statusCode, code: error.code, message: error.message, details: error.details };
   }

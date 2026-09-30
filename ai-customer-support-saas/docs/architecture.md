@@ -117,6 +117,15 @@ changes.
 - Design tokens in `styles/global.css` (@theme): brand, ink, success/warning/
   danger palettes drive utilities like `bg-brand-600`, `text-ink-500`.
 
+## Lifecycle & shutdown
+
+`server.ts` boots in order: validated config → database (fail-fast: an
+unreachable DB terminates the process so orchestrators restart it) → HTTP
+listener. SIGTERM/SIGINT/SIGBREAK run the **shutdown registry**
+(`core/lifecycle/shutdown-registry.ts`) sequentially: HTTP close → Mongo
+disconnect → (future: Socket.IO `io.close()`, BullMQ `worker.close()`).
+Subsystems register one hook; `server.ts` never grows a teardown pile.
+
 ## Monitoring (prepared)
 
 Structured JSON logs (pino) with request ids map 1:1 to CloudWatch Logs
