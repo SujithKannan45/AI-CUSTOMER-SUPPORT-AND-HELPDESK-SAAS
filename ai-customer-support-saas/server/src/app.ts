@@ -19,8 +19,12 @@ import { apiRouter } from './routes/api.routes.js';
  * carries a request id), security headers, CORS, body parsing, compression,
  * rate limiting, then routes, then the error pipeline. Nothing after the
  * error handler runs.
+ *
+ * `registerRoutes` receives the app just before the not-found/error
+ * handlers close the stack — the extension point for feature modules and
+ * verification probes, guaranteeing they sit inside the full pipeline.
  */
-export function createApp(): Express {
+export function createApp(registerRoutes?: (app: Express) => void): Express {
   const app = express();
 
   // Behind ALB/CloudFront, client IPs arrive in X-Forwarded-For; trust one hop
@@ -37,6 +41,8 @@ export function createApp(): Express {
   // Infrastructure probes stay outside the versioned API and the rate limiter.
   app.use(healthRouter);
   app.use(env.API_PREFIX, apiRouter);
+
+  registerRoutes?.(app);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

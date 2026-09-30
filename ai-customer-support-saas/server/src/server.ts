@@ -1,4 +1,5 @@
 import type { Server } from 'node:http';
+import { pathToFileURL } from 'node:url';
 
 import { createApp } from './app.js';
 import { env } from './config/env.config.js';
@@ -13,8 +14,12 @@ import { connectDatabase, disconnectDatabase } from './database/database.js';
  * The HTTP server is created explicitly so the real-time layer can attach to
  * the same listener later without a second port, and it is registered with
  * the shutdown registry for clean teardown.
+ *
+ * Exported (rather than run implicitly) so integration drivers and future
+ * tests can boot the real server in-process; the main-module guard below
+ * keeps direct execution identical to before.
  */
-async function bootstrap(): Promise<void> {
+export async function startServer(): Promise<Server> {
   const app = createApp();
 
   await connectDatabase();
@@ -72,11 +77,16 @@ async function bootstrap(): Promise<void> {
     logger.fatal({ err: error }, 'Uncaught exception — terminating');
     process.exit(1);
   });
+
+  return httpServer;
 }
 
-void bootstrap().catch((error: unknown) => {
-  // Fail-safe: an unreachable database or invalid config must terminate the
-  // process so orchestrators restart it, never leave it half-alive.
-  logger.fatal({ err: error }, 'Boot failed — exiting');
-  process.exit(1);
-});
+/** Runs only when this module is the process entry point. */
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void startServer().catch((error: unknown) => {
+    // Fail-safe: an unreachable database or invalid config must terminate the
+    // process so orchestrators restart it, never leave it half-alive.
+    logger.fatal({ err: error }, 'Boot failed — exiting');
+    process.exit(1);
+  });
+}

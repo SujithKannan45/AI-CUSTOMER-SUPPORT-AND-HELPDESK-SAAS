@@ -52,7 +52,7 @@ ai-customer-support-saas/
 │       └── server.ts       # HTTP listener + graceful shutdown
 ├── docker/                 # Dockerfiles + nginx
 ├── docs/                   # architecture.md
-├── scripts/                # dev-db.ts (Docker-less Mongo), verify-shutdown.ts
+├── scripts/                # dev-db.ts (Docker-less Mongo) + verification drivers
 ├── docker-compose.yml      # Local MongoDB (Redis commented for the jobs phase)
 └── package.json            # npm workspaces root
 ```
