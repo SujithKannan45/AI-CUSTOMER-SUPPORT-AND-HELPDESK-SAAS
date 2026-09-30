@@ -1,0 +1,24 @@
+# Development topology: MongoDB now; Redis (jobs) and Socket.IO tuning later.
+services:
+  mongo:
+    image: mongo:7
+    container_name: ai-support-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.adminCommand("ping").ok']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Enabled when the background-jobs phase lands:
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - '6379:6379'
+
+volumes:
+  mongo_data:

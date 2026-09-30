@@ -1,0 +1,23 @@
+# ── Dependencies ────────────────────────────────
+node_modules/
+
+# ── Builds ──────────────────────────────────────
+dist/
+build/
+.vite/
+coverage/
+
+# ── Environment & secrets ───────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Logs ────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+
+# ── OS / editor ─────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/

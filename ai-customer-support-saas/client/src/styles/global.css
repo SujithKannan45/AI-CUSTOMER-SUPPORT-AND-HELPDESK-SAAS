@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens — single source of truth for the product's visual language.
+ * Tailwind v4 generates utilities (bg-brand-600, text-ink-500, …) from these.
+ */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  /* Brand — calm, professional indigo */
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-800: #3730a3;
+  --color-brand-900: #312e81;
+
+  /* Neutral ink scale for text and surfaces */
+  --color-ink-50: #f8fafc;
+  --color-ink-100: #f1f5f9;
+  --color-ink-200: #e2e8f0;
+  --color-ink-300: #cbd5e1;
+  --color-ink-400: #94a3b8;
+  --color-ink-500: #64748b;
+  --color-ink-600: #475569;
+  --color-ink-700: #334155;
+  --color-ink-800: #1e293b;
+  --color-ink-900: #0f172a;
+
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+}
+
+/* Subtle full-page motion for route transitions (applied by <PageTransition/>). */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-ink-50 font-sans text-ink-800 antialiased;
+}
+
+/* Consistent focus rings for keyboard users across the app. */
+:where(a, button, input, select, textarea):focus-visible {
+  @apply outline-2 outline-offset-2 outline-brand-500;
+}
