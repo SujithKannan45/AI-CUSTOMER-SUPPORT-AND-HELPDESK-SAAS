@@ -1,0 +1,97 @@
+# Data model
+
+The MongoDB layer for the SaaS: five foundation collections, their indexes,
+and the rules future modules must follow. Layered on the connection management
+in `server/src/database/database.ts`.
+
+## Collections overview
+
+| Collection         | Module                                        | Tenant-scoped | Soft delete | Notes                                          |
+| ------------------ | --------------------------------------------- | ------------- | ----------- | ---------------------------------------------- |
+| `users`            | `modules/users`                               | No (global)   | No          | One identity per human; per-workspace roles live in `workspace_members` |
+| `workspaces`       | `modules/workspaces`                          | IS the tenant | No          | The tenant boundary; `status` covers archive lifecycle |
+| `workspace_members`| `modules/workspaces`                          | Yes           | No          | RBAC rows; one per (workspace, user); max one `owner` |
+| `customers`        | `modules/customers`                           | Yes           | **Yes**     | End users of a workspace; never members        |
+| `audit_logs`       | `modules/audit-logs`                          | Yes           | Never       | Append-only; updates/deletes rejected at model layer |
+
+## Relationships
+
+```
+User ──< WorkspaceMember >── Workspace (tenant boundary)
+                                │
+                                ├──< Customer
+                                ├──< AuditLog
+                                └──< (Ticket, Conversation, KnowledgeArticle,
+                                      Document, … — future phases, each with
+                                      a required workspaceId)
+```
+
+- `User 1─N WorkspaceMember N─1 Workspace`: one human, many workspaces, a
+  role in each. This replaced the earlier `User.memberships[]` embedding
+  plan — a collection scales better (unbounded arrays are forbidden) and can
+  be indexed/enforced independently.
+- Customers reference only their workspace; conversations/tickets/CSAT will
+  reference the customer by `_id` — never embedded.
+
+## Indexes
+
+All tenant-owned indexes lead with `workspaceId` (shared-pool tenancy).
+
+| Collection         | Index                                              | Purpose / decision |
+| ------------------ | -------------------------------------------------- | ------------------ |
+| users              | `{ email: 1 }` unique                              | Login lookup; emails are platform-global identities |
+| workspaces         | `{ slug: 1 }` unique                               | Tenant resolution by URL; slug is immutable |
+| workspace_members  | `{ workspaceId: 1, userId: 1 }` unique             | The hot RBAC path: "is user X in workspace Y, as what?" |
+| workspace_members  | `{ userId: 1, status: 1 }`                         | Reverse lookup: workspace switcher / session load |
+| workspace_members  | `{ workspaceId: 1 }` unique, partial `role: 'owner'` | DB-enforced single-owner invariant |
+| customers          | `{ workspaceId: 1, email: 1 }` unique, partial (`email` exists, `deletedAt: null`) | **Per-tenant** email uniqueness; anonymous (email-less) visitors and soft-deleted rows are exempt |
+| customers          | `{ workspaceId: 1, status: 1 }`                    | List/filter by lifecycle |
+| customers          | `{ workspaceId: 1, createdAt: -1 }`                | Newest signups, date-range analytics |
+| customers          | `{ workspaceId: 1, updatedAt: -1 }`                | "Recently active" views |
+| audit_logs         | `{ workspaceId: 1, createdAt: -1 }`                | Workspace activity feed, retention scans |
+| audit_logs         | `{ workspaceId: 1, resourceType: 1, resourceId: 1 }` | Per-resource history drill-down |
+| audit_logs         | `{ workspaceId: 1, actorId: 1, createdAt: -1 }`    | "What did this actor do" |
+
+Deliberately **not** added: a text index on customer name/email (future
+Atlas Search), an index on `workspaces.ownerId` (membership is the access
+path), a TTL index on `audit_logs` (retention is a compliance decision for
+the deploy phase).
+
+## Tenant isolation
+
+Enforced by construction, not by a global query interceptor (rejected:
+opaque, hard to test, blocks legitimate platform-level queries):
+
+1. `TenantScopedDocument` (in `database/tenant.ts`) — every tenant-owned
+   document type must carry `workspaceId`; TypeScript rejects models that
+   forget it.
+2. `tenantFilter(workspaceId)` — repositories build every tenant query by
+   spreading this helper; it normalizes string ids to ObjectId so indexes
+   always hit.
+3. `assertTenantScope(filter)` — repository-internal guard that throws a
+   non-operational `TENANT_SCOPE_VIOLATION` (opaque 500) when a filter
+   reaches the DB without a workspace scope.
+4. Index shape — compound indexes lead with `workspaceId`, so an unscoped
+   query is both a correctness bug and a full collection scan.
+
+## Soft-delete decisions
+
+| Model      | Decision | Rationale |
+| ---------- | -------- | --------- |
+| Customer   | `deletedAt` + live-only query scope + `WITH_DELETED` opt-in | User-triggered deletion of end-user data; preserves history, reversible; email is released for reuse via the partial index |
+| User       | No       | Account lifecycle is `status: invited/active/suspended`; real deletion is a compliance operation (future) |
+| Workspace  | No       | Lifecycle is `status: active/archived`; archiving is the reversible path |
+| WorkspaceMember | No  | Removing a membership is intentional and re-addable; audit trail records it |
+| AuditLog   | Never    | Immutable by design; updates and deletes throw at the model layer |
+
+## Schema evolution
+
+- All schemas use `timestamps: true` (AuditLog: `createdAt` only) — no manual
+  date maintenance.
+- `settings` on Workspace and `metadata` on Customer/AuditLog are typed
+  open-ended bags; new keys are additive and never break old documents
+  (Mongoose treats absent paths as `undefined`).
+- Enums are tuples (`WORKSPACE_ROLES`, …) in `*.types.ts` — widening a role
+  or status is an append, not a migration.
+- No migration framework yet; when a breaking field change is needed it will
+  be a documented script under `scripts/`, not an ad-hoc change.

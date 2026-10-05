@@ -37,13 +37,21 @@ the repository layer is where that switch would happen.
 
 ## RBAC model
 
-`User.memberships[] = { workspaceId, role }` — one identity, per-workspace
-roles. Roles planned: `owner`, `admin`, `agent`, `viewer`; customer "end
-users" are a separate collection, not a role.
+`WorkspaceMember` collection — one row per (workspace, user) holding the
+per-workspace role. Roles (centralized in
+`modules/workspaces/workspace.types.ts`): `owner`, `admin`, `agent`; a
+`viewer` can be appended later without schema changes. Customer "end users"
+are a separate collection (`customers`), never members.
 
 - `requireAuth` (JWT verify → req.user) then `requireRole(...roles)` and
-  `requireWorkspaceAccess(paramName)` guard chains per route.
+  `requireWorkspaceAccess(paramName)` guard chains per route (Prompt 4+).
 - Authorization checks live in middleware + services, never in controllers.
+- The database enforces invariants the app must not be able to break:
+  one membership per (workspace, user) and at most one `owner` per workspace
+  (partial unique index).
+
+Data-model details (collections, indexes, soft-delete decisions): see
+[docs/data-model.md](data-model.md).
 
 ## API conventions
 

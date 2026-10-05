@@ -23,13 +23,22 @@ modules/<feature>/
 `auth`, `users`, `workspaces`, `customers`, `tickets`, `conversations`,
 `knowledge-base`, `documents`, `ai`, `notifications`, `analytics`, `audit-logs`.
 
-Only `health` is implemented in the foundation phase. `ai` and `documents`
-contain **interface seams only** (no provider SDKs wired yet).
+`health` is implemented in the foundation phase; `users`, `workspaces`
+(incl. `WorkspaceMember`), `customers` and `audit-logs` now have their
+**models + types** (no repositories/services/controllers until their API
+phases — empty files are forbidden). `ai` and `documents` contain **interface
+seams only** (no provider SDKs wired yet).
 
 ## Conventions
 
 - Controllers never contain business logic; services never import Express.
 - Every public route is validated with a Zod schema via `validate()`.
 - All queries are tenant-scoped: every tenant-owned schema carries a
-  `workspaceId` field and an index on it (see `docs/architecture.md`).
+  `workspaceId` field and an index on it (see `docs/architecture.md` and
+  `docs/data-model.md`). Repositories build filters through
+  `database/tenant.ts` helpers (`tenantFilter`, `assertTenantScope`) and must
+  not hand-roll `{ workspaceId }` literals.
 - Repositories may not leak Mongoose documents past the service layer.
+- Model files define schema + validation + indexes; shared TS types and
+  enums live in `<feature>.types.ts`; no secrets or credentials in seed data
+  (`scripts/seed-dev-data.ts` is the dev-only exception, guard-railed).

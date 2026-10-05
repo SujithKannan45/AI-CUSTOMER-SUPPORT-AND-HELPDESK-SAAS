@@ -22,7 +22,9 @@
     ,
     "db:up": "docker compose -f docker-compose.yml up -d mongo",
     "db:down": "docker compose -f docker-compose.yml down",
-    "db:memory": "tsx scripts/dev-db.ts"
+    "db:memory": "tsx scripts/dev-db.ts",
+    "verify:models": "tsx scripts/verify-models.ts",
+    "seed:dev": "tsx scripts/seed-dev-data.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
