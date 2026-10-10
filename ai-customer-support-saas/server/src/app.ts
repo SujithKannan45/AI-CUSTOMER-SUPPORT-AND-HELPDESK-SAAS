@@ -1,4 +1,5 @@
 import compression from 'compression';
+import cookieParser from 'cookie-parser';
 import express, {type  Express } from 'express';
 
 import { env } from './config/env.config.js';
@@ -35,6 +36,8 @@ export function createApp(registerRoutes?: (app: Express) => void): Express {
   app.use(securityHeaders);
   app.use(corsMiddleware);
   app.use(express.json({ limit: '1mb' }));
+  // Refresh-token cookies (HttpOnly) are read by the auth module only.
+  app.use(cookieParser());
   app.use(compression());
   app.use(globalLimiter);
 

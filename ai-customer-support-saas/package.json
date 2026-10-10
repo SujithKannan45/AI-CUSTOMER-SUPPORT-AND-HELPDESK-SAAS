@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "dev:server": "npm run dev --workspace server",
+    "dev:server:memory": "npm run db:memory & sleep 2 && PORT=8000 MONGODB_URI=mongodb://127.0.0.1:27777/ai_support_saas npm run dev --workspace server",
     "dev:client": "npm run dev --workspace client",
     "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev:server\" \"npm run dev:client\"",
     "build": "npm run build --workspace server && npm run build --workspace client",
@@ -24,6 +25,7 @@
     "db:down": "docker compose -f docker-compose.yml down",
     "db:memory": "tsx scripts/dev-db.ts",
     "verify:models": "tsx scripts/verify-models.ts",
+    "verify:auth": "tsx scripts/verify-auth.ts",
     "seed:dev": "tsx scripts/seed-dev-data.ts"
   },
   "devDependencies": {

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { env } from '../config/env.config.js';
+import { authRouter } from '../modules/auth/auth.routes.js';
 
 /**
  * Versioned API root. Feature-module routers are mounted here as they are
@@ -13,6 +14,8 @@ import { env } from '../config/env.config.js';
  * consistent `/api/v1/...` prefix.
  */
 export const apiRouter = Router();
+
+apiRouter.use('/auth', authRouter);
 
 apiRouter.get('/', (_req, res) => {
   res.json({

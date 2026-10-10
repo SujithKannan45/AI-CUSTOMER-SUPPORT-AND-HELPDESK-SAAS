@@ -53,6 +53,44 @@ are a separate collection (`customers`), never members.
 Data-model details (collections, indexes, soft-delete decisions): see
 [docs/data-model.md](data-model.md).
 
+## Authentication (implemented)
+
+Short-lived **access JWTs** + long-lived **opaque rotating refresh tokens**:
+
+- **Access token** — HS256 JWT via `jose`, claims limited to `sub/type/iat/exp`
+  (`modules/auth/auth.tokens.ts`). No email, roles or workspace data in the
+  payload; identity state is re-checked per request (`requireAuth`) so
+  suspension/revocation is instant. TTL `JWT_ACCESS_TTL` (15m).
+- **Refresh token** — 32-byte opaque random string, stored ONLY as a SHA-256
+  hash in the `refresh_tokens` collection (one doc per session/device, with
+  ip/user-agent, `familyId` for the rotation chain). On refresh the token is
+  **rotated** (predecessor revoked + successor linked); presenting an already-
+  rotated token is treated as theft and revokes the whole family. TTL
+  `JWT_REFRESH_TTL` (7d).
+- **Delivery** — access token in the JSON body (`Authorization: Bearer` for
+  the SPA); refresh token additionally in an **HttpOnly cookie** scoped to
+  `Path=/api/v1/auth`, SameSite from `COOKIE_SAMESITE`, Secure in production
+  (`COOKIE_SECURE=auto`). cookie-parser is wired in `app.ts`.
+- **Middleware** — `requireAuth` (`modules/auth/require-auth.middleware.ts`)
+  verifies the JWT, then re-checks the live account (status `active`,
+  `tokenVersion` current) and attaches a typed `req.auth = { userId }` via
+  module augmentation. Authorization/RBAC deliberately NOT here — later
+  middleware composes on `req.auth`.
+- **One-time tokens** (verify-email, password reset) — 32-byte random, hashed
+  at rest in `auth_tokens` (scoped by email + purpose, single unique live token
+  per pair, atomic consume, TTLs `AUTH_VERIFY_EMAIL_TTL` / `AUTH_PASSWORD_RESET_TTL`).
+- **Emails** — provider-independent `EmailTransport` seam
+  (`modules/auth/email/`); the dev `log` outbox keeps an in-memory ring buffer
+  and is hard-blocked in production; SMTP/SES adapters land behind the same
+  interface.
+- **Anti-enumeration** — login failures use one uniform message (with a
+  constant-time bcrypt compare even for unknown accounts); forgot-password and
+  resend-verification always return the same response.
+- **Audit** — auth events append to the existing `AuditLog` collection under a
+  reserved all-zero platform scope (`auth-audit.ts`): `user.login`,
+  `user.login_failed`, `user.logout`, `user.logout_all`, `user.registered`,
+  `user.email_verified`, `user.password_reset`, … Never tokens/passwords.
+
 ## API conventions
 
 - Versioned prefix `/api/v1` (assembly point: `routes/api.routes.ts`).

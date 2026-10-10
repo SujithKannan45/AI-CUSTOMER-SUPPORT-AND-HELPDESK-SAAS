@@ -12,7 +12,22 @@ in `server/src/database/database.ts`.
 | `workspaces`       | `modules/workspaces`                          | IS the tenant | No          | The tenant boundary; `status` covers archive lifecycle |
 | `workspace_members`| `modules/workspaces`                          | Yes           | No          | RBAC rows; one per (workspace, user); max one `owner` |
 | `customers`        | `modules/customers`                           | Yes           | **Yes**     | End users of a workspace; never members        |
-| `audit_logs`       | `modules/audit-logs`                          | Yes           | Never       | Append-only; updates/deletes rejected at model layer |
+| `audit_logs`       | `modules/audit-logs`                          | Yes (platform scope reserved) | Never | Append-only; updates/deletes rejected at model layer |
+| `refresh_tokens`   | `modules/auth`                                | No (per user) | Revocation  | One row per active session; SHA-256 **hash only**, rotation chain via `familyId` |
+| `auth_tokens`      | `modules/auth`                                | No (per email) | Consumed/expiry | One-time verify-email / password-reset tokens, hashed at rest |
+
+## Authentication collections (added in the auth phase)
+
+- **Why not JWT-only refresh tokens?** Opaque random strings hashed in the DB
+  beat stateless refresh JWTs: revocation is instant and per-session, and a
+  database leak exposes only hashes.
+- **Why a collection, not a `User.sessions[]` array?** Unbounded arrays are
+  forbidden (same decision as memberships); a collection scales to many
+  devices per user and indexes independently.
+- **Platform audit scope** — auth events (login, logout, password reset…)
+  happen before any workspace context exists; they are appended to
+  `audit_logs` under the reserved all-zero `workspaceId`
+  (`PLATFORM_SCOPE` in `modules/auth/auth-audit.ts`).
 
 ## Relationships
 
@@ -51,6 +66,10 @@ All tenant-owned indexes lead with `workspaceId` (shared-pool tenancy).
 | audit_logs         | `{ workspaceId: 1, createdAt: -1 }`                | Workspace activity feed, retention scans |
 | audit_logs         | `{ workspaceId: 1, resourceType: 1, resourceId: 1 }` | Per-resource history drill-down |
 | audit_logs         | `{ workspaceId: 1, actorId: 1, createdAt: -1 }`    | "What did this actor do" |
+| refresh_tokens     | `{ tokenHash: 1 }` unique (field `select: false`)  | Refresh-endpoint lookup by hash — raw tokens are never stored |
+| refresh_tokens     | `{ familyId: 1 }`                                  | Rotation chains + family-wide revocation (reuse = theft) |
+| refresh_tokens     | `{ userId: 1, expiresAt: -1 }`                     | Active-session lists, logout-all, TTL-friendly shape |
+| auth_tokens        | `{ email: 1, purpose: 1 }` unique                  | One live token per (email, purpose); re-issue replaces the old one |
 
 Deliberately **not** added: a text index on customer name/email (future
 Atlas Search), an index on `workspaces.ownerId` (membership is the access
