@@ -2,13 +2,11 @@ import { Router } from 'express';
 
 import { env } from '../config/env.config.js';
 import { authRouter } from '../modules/auth/auth.routes.js';
+import { workspaceRouter } from '../modules/workspaces/workspace.routes.js';
 
 /**
  * Versioned API root. Feature-module routers are mounted here as they are
- * implemented, e.g.:
- *
- *   apiRouter.use('/auth', authRouter);
- *   apiRouter.use('/workspaces', workspaceRouter);
+ * implemented (auth, workspaces, and future modules).
  *
  * Keeping one assembly point prevents route sprawl and gives every endpoint a
  * consistent `/api/v1/...` prefix.
@@ -16,6 +14,7 @@ import { authRouter } from '../modules/auth/auth.routes.js';
 export const apiRouter = Router();
 
 apiRouter.use('/auth', authRouter);
+apiRouter.use('/workspaces', workspaceRouter);
 
 apiRouter.get('/', (_req, res) => {
   res.json({

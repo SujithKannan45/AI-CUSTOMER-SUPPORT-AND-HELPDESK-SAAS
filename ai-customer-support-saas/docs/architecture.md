@@ -43,8 +43,11 @@ per-workspace role. Roles (centralized in
 `viewer` can be appended later without schema changes. Customer "end users"
 are a separate collection (`customers`), never members.
 
-- `requireAuth` (JWT verify → req.user) then `requireRole(...roles)` and
-  `requireWorkspaceAccess(paramName)` guard chains per route (Prompt 4+).
+- `requireAuth` (JWT verify → `req.auth`) then `validate(schema, 'params')`
+  and `requireWorkspaceContext()` — the workspace-context gate that loads the
+  workspace + caller's membership, confirms both are `active`, and attaches a
+  typed `req.workspace` per route (Prompt 5; `requireRole(...roles)` owners
+  checks remain owner-only until Prompt 6 widens them into RBAC).
 - Authorization checks live in middleware + services, never in controllers.
 - The database enforces invariants the app must not be able to break:
   one membership per (workspace, user) and at most one `owner` per workspace
