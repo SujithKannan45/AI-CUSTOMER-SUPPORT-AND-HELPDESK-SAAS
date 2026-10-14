@@ -39,19 +39,60 @@ the repository layer is where that switch would happen.
 
 `WorkspaceMember` collection — one row per (workspace, user) holding the
 per-workspace role. Roles (centralized in
-`modules/workspaces/workspace.types.ts`): `owner`, `admin`, `agent`; a
-`viewer` can be appended later without schema changes. Customer "end users"
-are a separate collection (`customers`), never members.
+`modules/workspaces/workspace.types.ts`): `owner`, `admin`, `agent`,
+`viewer` (Prompt 6 added viewer; enums are tuples, so widening is app safe).
+Customer "end users" are a separate collection (`customers`), never members.
 
-- `requireAuth` (JWT verify → `req.auth`) then `validate(schema, 'params')`
-  and `requireWorkspaceContext()` — the workspace-context gate that loads the
-  workspace + caller's membership, confirms both are `active`, and attaches a
-  typed `req.workspace` per route (Prompt 5; `requireRole(...roles)` owners
-  checks remain owner-only until Prompt 6 widens them into RBAC).
-- Authorization checks live in middleware + services, never in controllers.
-- The database enforces invariants the app must not be able to break:
-  one membership per (workspace, user) and at most one `owner` per workspace
+Authorization has three composable layers, all in one decision pipeline:
+
+```
+requireAuth (JWT → req.auth)
+  → validate(schema, 'params')
+  → requireWorkspaceContext()      — loads workspace + membership,
+                                     both must be active; failures 404
+                                     (no existence oracle)
+  → requirePermission(permission)  — 403 + audit decision (modules/rbac)
+```
+
+1. **Permission registry** (`modules/rbac/rbac.permissions.ts`) — the ONLY
+   place mapping roles to permissions (`workspace.view`,
+   `workspace.settings.update`, `workspace.security.manage`, `ticket.*`,
+   `customer.*` …). Grant = explicit entry; absence = denial (least
+   privilege: new permissions default to denied for every role). Rationale
+   for each grant lives in the file. Controllers/services never compare
+   role names.
+2. **Membership policy** (`modules/rbac/rbac-policy.ts`) — pure evaluators
+   that make membership escalation structurally impossible for future
+   member-administration endpoints: no self role changes, owner rows are
+   immutable through ordinary flows, admins can only administer + assign
+   strictly-lower roles, ordinary operations never mint or destroy owners
+   (single-owner invariant is additionally DB-enforced by the partial
+   unique index). Reserved audit actions export alongside it.
+3. **Resource-assignment helpers** (`modules/rbac/resource-access.ts`) —
+   the assignment CAP for ticket/customer/conversation modules: agents may
+   modify only resources assigned to them (per-module `allowCreator` /
+   `allowUnassignedAgents` knobs always default FALSE); viewer/permission-
+   less roles are never granted via assignment; cross-workspace resources
+   are rejected (`assertSameWorkspace`).
+
+- `requireWorkspaceContext()` (Prompt 5) — the tenant gate that attaches
+  typed `req.workspace` = { workspace, membership, role }. The RBAC
+  middleware derives the effective role ONLY from that DB-validated
+  membership row — never from body, query or headers (client-supplied role
+  values are stripped/ignored). The `ownerId` user is treated as owner as
+  defense-in-depth for corrupted membership rows (logged anomaly).
+- Authorization failures: 401 unauthenticated, 404 concealment for
+  strangers/inactive memberships, 403 for insufficient permission; denials
+  of permission-guarded operations append `workspace.permission_denied` to
+  the immutable AuditLog (actor/workspace/metadata only — never secrets).
+- The database enforces invariants the app must not be able to break: one
+  membership per (workspace, user) and at most one `owner` per workspace
   (partial unique index).
+
+Prompt 6 endpoints secured: `GET /workspaces/:id` (workspace.view),
+`PATCH /workspaces/:id` (workspace.settings.update — owner + admin).
+Membership administration endpoints are intentionally absent (later phase)
+but their policy layer, validators and audit hooks are ready.
 
 Data-model details (collections, indexes, soft-delete decisions): see
 [docs/data-model.md](data-model.md).

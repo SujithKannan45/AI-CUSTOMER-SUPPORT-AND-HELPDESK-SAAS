@@ -203,8 +203,14 @@ export async function getWorkspaceDetailFlow(
 }
 
 /**
- * Owner-only update path. Access checks mirror detail (404 for
- * unknown/foreign/non-member; 403 when a valid member is not the owner).
+ * Workspace settings update path. WHO may update is the permission
+ * registry's job: the PATCH route is gated by
+ * `requirePermission(WORKSPACE_PERMISSIONS.updateWorkspaceSettings)` before
+ * this flow runs (granted to owner + admin). This flow keeps ONLY the
+ * tenant/membership checks it needs to stay safe when invoked outside the
+ * HTTP layer (404 for unknown workspace / inactive membership — no existence
+ * oracle); it never re-checks roles, which would duplicate authorization
+ * logic in two places.
  */
 export async function updateWorkspaceFlow(
   workspaceId: string,
@@ -220,11 +226,8 @@ export async function updateWorkspaceFlow(
   if (membership === null || !isMembershipActive(membership)) {
     throw AppError.notFound('Workspace not found');
   }
-  if (!isWorkspaceOwner(workspace, userId)) {
-    // Members may know the workspace exists (they can read it), but updates
-    // are owner-only until Prompt 6 adds role middleware.
-    throw AppError.forbidden('Only the workspace owner can update the workspace');
-  }
+  // NOTE: no role check here by design — see the doc comment above; route
+  // middleware (modules/rbac) owns the authorization decision.
   const updated = await updateWorkspace(new Types.ObjectId(workspaceId), updates);
   if (updated === null) {
     throw AppError.notFound('Workspace not found');

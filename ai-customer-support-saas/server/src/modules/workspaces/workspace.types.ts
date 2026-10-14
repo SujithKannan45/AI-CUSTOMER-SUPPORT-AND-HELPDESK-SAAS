@@ -3,14 +3,17 @@ import type { Document, Types } from 'mongoose';
 /**
  * Centralized RBAC vocabulary for the whole SaaS.
  *
- * Every role reference in the codebase — schemas, future auth middleware,
+ * Every role reference in the codebase — schemas, authorization middleware,
  * services, seeded data — must import from here. Never scatter `'admin'`
  * string literals; a typo becomes a permission hole.
  *
- * Hierarchy: owner > admin > agent. A `viewer` role can be added later by
- * appending to the tuple and the weight map — no schema rewrite needed.
+ * Hierarchy: owner > admin > agent > viewer. Roles are an ordered tuple with
+ * numeric weights: role LEVEL answers "is this role at least a manager?",
+ * while the permission registry (modules/rbac) answers "may this role do X
+ * exactly?". Both exist because hierarchy alone is too coarse (an agent must
+ * not create customers, yet outranks viewer).
  */
-export const WORKSPACE_ROLES = ['owner', 'admin', 'agent'] as const;
+export const WORKSPACE_ROLES = ['owner', 'admin', 'agent', 'viewer'] as const;
 export type WorkspaceRole = (typeof WORKSPACE_ROLES)[number];
 
 /** Numeric weight per role; higher wins. The single source of role ordering. */
@@ -18,6 +21,7 @@ export const ROLE_WEIGHTS: Record<WorkspaceRole, number> = {
   owner: 3,
   admin: 2,
   agent: 1,
+  viewer: 0,
 };
 
 /**

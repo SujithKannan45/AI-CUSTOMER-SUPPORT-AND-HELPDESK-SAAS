@@ -10,7 +10,7 @@ in `server/src/database/database.ts`.
 | ------------------ | --------------------------------------------- | ------------- | ----------- | ---------------------------------------------- |
 | `users`            | `modules/users`                               | No (global)   | No          | One identity per human; per-workspace roles live in `workspace_members` |
 | `workspaces`       | `modules/workspaces`                          | IS the tenant | No          | The tenant boundary; `status` covers archive lifecycle |
-| `workspace_members`| `modules/workspaces`                          | Yes           | No          | RBAC rows; one per (workspace, user); max one `owner` |
+| `workspace_members`| `modules/workspaces`                          | Yes           | No          | RBAC rows; one per (workspace, user); max one `owner`; roles `owner/admin/agent/viewer` mapped to permissions in `modules/rbac` |
 | `customers`        | `modules/customers`                           | Yes           | **Yes**     | End users of a workspace; never members        |
 | `audit_logs`       | `modules/audit-logs`                          | Yes (platform scope reserved) | Never | Append-only; updates/deletes rejected at model layer |
 | `refresh_tokens`   | `modules/auth`                                | No (per user) | Revocation  | One row per active session; SHA-256 **hash only**, rotation chain via `familyId` |
@@ -111,6 +111,9 @@ opaque, hard to test, blocks legitimate platform-level queries):
   open-ended bags; new keys are additive and never break old documents
   (Mongoose treats absent paths as `undefined`).
 - Enums are tuples (`WORKSPACE_ROLES`, …) in `*.types.ts` — widening a role
-  or status is an append, not a migration.
+  or status is an append, not a migration (the `viewer` role from the RBAC
+  phase was added exactly this way).
+- Authorization semantics live OUTSIDE the schema: role values are storage,
+  grants come from the centralized registry (`modules/rbac/rbac.permissions.ts`).
 - No migration framework yet; when a breaking field change is needed it will
   be a documented script under `scripts/`, not an ad-hoc change.

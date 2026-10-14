@@ -36,7 +36,7 @@ export interface WorkspaceContext {
   readonly workspace: WorkspaceDocument;
   /** The caller's (verified-active) membership row. */
   readonly membership: WorkspaceMemberDocument;
-  /** Convenience for owner-only routes; Prompt 6 widens this into RBAC. */
+  /** Convenience flag; the RBAC layer (modules/rbac) is the real authority. */
   readonly isOwner: boolean;
   readonly role: WorkspaceMemberDocument['role'];
 }

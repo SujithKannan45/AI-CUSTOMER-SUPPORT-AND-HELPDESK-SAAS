@@ -27,6 +27,7 @@
     "verify:models": "tsx scripts/verify-models.ts",
     "verify:workspaces": "tsx scripts/verify-workspaces.ts",
     "verify:auth": "tsx scripts/verify-auth.ts",
+    "verify:rbac": "tsx scripts/verify-rbac.ts",
     "seed:dev": "tsx scripts/seed-dev-data.ts"
   },
   "devDependencies": {

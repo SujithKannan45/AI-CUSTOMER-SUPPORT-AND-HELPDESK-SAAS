@@ -157,10 +157,12 @@ async function main(): Promise<void> {
     ),
   );
   record(
-    'role vocabulary is exactly owner/admin/agent',
-    WORKSPACE_ROLES.length === 3 &&
+    'role vocabulary is exactly owner/admin/agent/viewer (Prompt 6 added viewer)',
+    WORKSPACE_ROLES.length === 4 &&
       hasAtLeastRole('admin', 'agent') &&
-      !hasAtLeastRole('agent', 'admin'),
+      !hasAtLeastRole('agent', 'admin') &&
+      !hasAtLeastRole('viewer', 'agent') &&
+      !hasAtLeastRole('viewer', 'admin'),
   );
 
   // -- 3. Global user-email uniqueness -----------------------------------------
