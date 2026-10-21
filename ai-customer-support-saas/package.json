@@ -28,6 +28,7 @@
     "verify:workspaces": "tsx scripts/verify-workspaces.ts",
     "verify:auth": "tsx scripts/verify-auth.ts",
     "verify:rbac": "tsx scripts/verify-rbac.ts",
+    "verify:customers": "tsx scripts/verify-customers.ts",
     "seed:dev": "tsx scripts/seed-dev-data.ts"
   },
   "devDependencies": {

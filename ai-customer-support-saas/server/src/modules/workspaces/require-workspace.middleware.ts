@@ -58,12 +58,12 @@ export function requireWorkspaceContext(): RequestHandler {
 
     const validatedParams = (req as Request & { validated?: { params?: unknown } }).validated
       ?.params as Record<string, string> | undefined;
-    // Defense-in-depth: re-check the FULL params object against the param
-    // schema (same object shape the validate middleware already enforced at
-    // the route layer — see workspace.validation.ts).
-    const paramParse = workspaceIdParamSchema.safeParse(
-      validatedParams ?? req.params,
-    );
+    // Defense-in-depth: re-check the workspaceId SHAPE against the param
+    // schema. Only that single key is extracted (routes nested under this
+    // middleware, e.g. customers, carry additional validated params such as
+    // customerId — validated by their own strict schemas at the route layer).
+    const rawParams = validatedParams ?? (req.params as { workspaceId?: string });
+    const paramParse = workspaceIdParamSchema.safeParse({ workspaceId: rawParams['workspaceId'] });
     if (!paramParse.success) {
       next(AppError.notFound('Workspace not found'));
       return;

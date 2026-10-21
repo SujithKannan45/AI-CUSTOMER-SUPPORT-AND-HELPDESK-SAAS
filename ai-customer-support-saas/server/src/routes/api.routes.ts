@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { env } from '../config/env.config.js';
 import { authRouter } from '../modules/auth/auth.routes.js';
+import { customerRouter } from '../modules/customers/customer.routes.js';
 import { workspaceRouter } from '../modules/workspaces/workspace.routes.js';
 
 /**
@@ -15,6 +16,11 @@ export const apiRouter = Router();
 
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/workspaces', workspaceRouter);
+// Customer routes nest under the workspace tenant context:
+// `/api/v1/workspaces/:workspaceId/customers` carries the parent's
+// `:workspaceId` param (mergeParams) so every customer request is scoped by
+// the same validated workspace-context middleware.
+apiRouter.use('/workspaces/:workspaceId/customers', customerRouter);
 
 apiRouter.get('/', (_req, res) => {
   res.json({
