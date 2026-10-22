@@ -13,6 +13,8 @@ in `server/src/database/database.ts`.
 | `workspace_members`| `modules/workspaces`                          | Yes           | No          | RBAC rows; one per (workspace, user); max one `owner`; roles `owner/admin/agent/viewer` mapped to permissions in `modules/rbac` |
 | `customers`        | `modules/customers`                           | Yes           | **Yes**     | End users of a workspace; never members        |
 | `tickets`          | `modules/tickets`                             | Yes           | **Yes**     | Workspace-scoped desk item; `number` (`TKT-######`) unique per workspace; `priorityRank` is derived/computed state |
+| `conversations`    | `modules/conversations`                       | Yes           | No          | ONE primary thread per ticket (`{ workspaceId, ticketId }` unique); NO status of its own — lifecycle is inherited from the ticket; last-message metadata is advisory and self-healing |
+| `messages`         | `modules/conversations`                       | Yes           | Never       | Immutable after send (audited sender-only body edit); `ticketId` denormalized server-side; `visibility` `PUBLIC`/`INTERNAL`; attachments are Prompt 12 references only |
 | `ticket_counters`  | `modules/tickets`                             | Yes (embeds workspaceId) | No | Internal allocation sequence — one `{ seq }` row per workspace, atomically incremented; never read by the API |
 | `audit_logs`       | `modules/audit-logs`                          | Yes (platform scope reserved) | Never | Append-only; updates/deletes rejected at model layer |
 | `refresh_tokens`   | `modules/auth`                                | No (per user) | Revocation  | One row per active session; SHA-256 **hash only**, rotation chain via `familyId` |
@@ -37,12 +39,13 @@ in `server/src/database/database.ts`.
 User ──< WorkspaceMember >── Workspace (tenant boundary)
                                 │
                                 ├──< Customer
-                                ├──< Ticket (Prompt 8 — conversations will
-                                │    reference these ids in Prompt 9)
+                                ├──< Ticket (Prompt 8)
+                                │     └──1 Conversation (Prompt 9)
+                                │          └──< Message (Prompt 9)
                                 ├──< AuditLog
-                                └──< (Conversation, KnowledgeArticle,
-                                      Document, … — future phases, each with
-                                      a required workspaceId)
+                                └──< (KnowledgeArticle, Document, … —
+                                      future phases, each with a
+                                      required workspaceId)
 ```
 
 - `User 1─N WorkspaceMember N─1 Workspace`: one human, many workspaces, a
@@ -54,6 +57,51 @@ User ──< WorkspaceMember >── Workspace (tenant boundary)
 - Tickets reference only ids (`customerId`, `agentId`, `createdById`) — no
   duplicated customer/user data; consumers resolve names through their own
   modules.
+- Conversations reference one ticket, one customer (copied from the ticket
+  SERVER-SIDE at creation — never a client field), and carry ids-only
+  last-message pointers. Messages reference the conversation and carry a
+  denormalized `ticketId` for cheap ticket-scoped queries. No message body
+  or sender profile is ever duplicated into Conversation documents.
+
+## Conversation & Message collections (Prompt 9)
+
+- **One primary conversation per ticket** — enforced as a LAW by the unique
+  `{ workspaceId, ticketId }` index. A lost get-or-create race loses against
+  the index and re-reads the winner (`createConversationRaceSafe`), so even
+  concurrent callers can never materialize two threads for one ticket.
+  The alternative (multiple conversations per ticket) was rejected because
+  the ticket module already defines status/history triage; per-ticket
+  threading would duplicate that lifecycle.
+- **No conversation status** — conversations open and close with their
+  ticket; a second state machine would be a conflicting lifecycle. When a
+  ticket is archived (soft-delete stamp), its conversation and messages read
+  as 404 through every path (live-ticket re-check on every flow).
+- **Advisory, self-healing metadata** — `lastMessageAt`/`lastMessageById`
+  are pointers maintained after each send. Because this deployment does NOT
+  support multi-document transactions (standalone mongod), message +
+  metadata is not atomic: a failed metadata update is logged and the next
+  authorized thread read recomputes the values from the newest message
+  (`repairConversationMetadata`, idempotent under concurrency). The MESSAGE
+  document is always the authoritative record; success responses are never
+  suppressed by metadata or audit failures (documented fire-and-forget).
+- **Visibility** — `PUBLIC` (customer-facing) and `INTERNAL` (staff-only
+  notes). Internal access is DERIVED from the centralized permission
+  registry (`conversation.reply`): staff can read internal notes; roles
+  without that permission get internal notes excluded IN THE QUERY (they
+  never reach the application to be scrubbed) and 403 on a direct read.
+  Visibility is immutable — PATCH accepts `body` only, so no client can
+  flip public↔internal.
+- **Edit/deletion policy** — messages are never deleted; the ONLY supported
+  edit is the original sender changing the body (audited as
+  `message.edited`; nobody, administrators included, may rewrite someone
+  else's message). `attachments` stores Prompt 12 REFERENCES only; no API
+  accepts attachment data yet.
+- **Customer identity dependency** — no customer-portal authentication
+  exists yet, so `senderType: 'CUSTOMER'` is a reserved type. Sender
+  identity is always derived from the authenticated principal; an arbitrary
+  customerId in a request can never mint a sender. Customer senders arrive
+  with the customer identity mechanism (a documented later-phase
+  dependency), never by trusting client-supplied identity.
 
 ## Ticket collection (Prompt 8)
 
@@ -99,6 +147,11 @@ All tenant-owned indexes lead with `workspaceId` (shared-pool tenancy).
 | tickets            | `{ workspaceId: 1, customerId: 1, createdAt: -1 }` | "All tickets for this customer" detail page |
 | tickets            | `{ workspaceId: 1, agentId: 1, updatedAt: -1 }`    | Agent work queue |
 | tickets            | `{ workspaceId: 1, createdAt: -1 }` / `{ workspaceId: 1, updatedAt: -1 }` | Date-range filters and newest/updated sort fallbacks |
+| conversations      | `{ workspaceId: 1, ticketId: 1 }` UNIQUE       | ONE primary conversation per ticket — the database-enforced design law; also the get-or-create race arbiter |
+| conversations      | `{ workspaceId: 1, customerId: 1, updatedAt: -1 }` | The customer's conversation list (customerId copied from the ticket at creation) |
+| conversations      | `{ workspaceId: 1, lastMessageAt: -1 }`        | Workspace inbox / recent-activity views (Prompt 10 reads this shape) |
+| messages           | `{ workspaceId: 1, conversationId: 1, createdAt: 1 }` | Chronological thread reads (pagination sorts `{ createdAt: 1, _id: 1 }` for a stable per-millisecond order) |
+| messages           | `{ workspaceId: 1, ticketId: 1, createdAt: -1 }` | "Everything sent about this ticket" (ticket-scoped search/export) — cheap because `ticketId` is denormalized server-side |
 | audit_logs         | `{ workspaceId: 1, createdAt: -1 }`                | Workspace activity feed, retention scans |
 | audit_logs         | `{ workspaceId: 1, resourceType: 1, resourceId: 1 }` | Per-resource history drill-down |
 | audit_logs         | `{ workspaceId: 1, actorId: 1, createdAt: -1 }`    | "What did this actor do" |

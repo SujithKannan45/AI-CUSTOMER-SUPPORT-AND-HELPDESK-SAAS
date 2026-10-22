@@ -144,6 +144,70 @@ POST   /:ticketId/archive    ticket.update (soft-delete stamp)
 Data-model details (collections, indexes, soft-delete decisions): see
 [docs/data-model.md](data-model.md).
 
+## Conversations & messages (Prompt 9, implemented)
+
+Every endpoint is workspace-scoped, mounted alongside the ticket routes in
+`routes/api.routes.ts` (gate: `requireAuth → validate(params) →
+requireWorkspaceContext → requirePermission`):
+
+```
+POST   …/tickets/:ticketId/conversations                  conversation.reply   (get-or-create the ONE primary conversation)
+GET    …/tickets/:ticketId/conversations                  conversation.view    (paginated list for a ticket)
+GET    …/conversations/:conversationId                    conversation.view
+POST   …/conversations/:conversationId/messages           conversation.reply   (public reply / internal note)
+GET    …/conversations/:conversationId/messages           conversation.view    (chronological thread page)
+GET    …/conversations/:conversationId/messages/:messageId conversation.view   (authorized single message)
+PATCH  …/conversations/:conversationId/messages/:messageId conversation.reply  (sender-only body edit)
+```
+
+- **One primary conversation per ticket** — `{ workspaceId, ticketId }`
+  unique index; concurrent get-or-create races lose safely and return the
+  existing conversation with `created: false`. No second ticket lifecycle:
+  conversations carry NO status — when the ticket is archived, its
+  conversation and messages read as 404 everywhere (a live-ticket check
+  runs on every flow, not just creation).
+- **Sender identity is server-derived** — `req.auth` + the validated
+  membership compose the sender (`senderType: 'AGENT'` today). Payloads are
+  structurally incapable of carrying `workspaceId`, `ticketId`,
+  `customerId`, `senderId`, `senderType` or `visibility` after send (strict
+  Zod schemas reject them). `visibility` is chosen at SEND time only and is
+  immutable afterwards.
+- **Internal notes are staff-only BY DERIVATION** — only roles holding
+  `conversation.reply` (owner/admin/agent) reach message sending, so an
+  internal note can only exist by a staff action. Read-side, roles without
+  the permission get internal notes excluded IN THE QUERY (never returned
+  and scrubbed) and a 403 on direct internal reads. No customer-portal
+  authentication exists yet (documented dependency): customers cannot send
+  or read anything in this phase — customer identity flows are reserved
+  types, never fabricated from a client-supplied customerId.
+- **Agent cap** — owners/admins may send on any ticket in their workspace
+  (triage roles); agents may send only on tickets ASSIGNED to them or
+  OPENED by them (`evaluateResourceModification` with `allowCreator: true`,
+  identical to the ticket module's rule); viewers are structurally denied
+  any write (get-or-create and sending require `reply`, a permission viewer
+  does not hold).
+- **Tenant isolation** — repositories compose every query from the
+  server-side `workspaceId` AND its parent resource (message lookups are
+  `{ workspaceId, conversationId, _id }` scoped); foreign conversation or
+  message ids read as 404 with no cross-tenant existence oracle.
+- **Consistency (documented honestly)** — no multi-document transactions in
+  this deployment. Message insert is document-atomic; the conversation's
+  last-message metadata update is advisory: on failure the message remains
+  authoritative, the failure is logged, and the next authorized thread read
+  self-heals the metadata from the newest message. Audit appends follow the
+  project-wide fire-and-forget convention. Ticket status/assignment are
+  deliberately untouched by messaging.
+- **Edit policy** — the only history-changing operation supported is a
+  body-only edit by the ORIGINAL sender (all edits audited as
+  `message.edited`; no deletion endpoint exists). Attachments are stored as
+  references for Prompt 12; no upload flow exists in this phase.
+- **Audit actions** — `conversation.created`, `message.created`,
+  `message.edited` (actor, workspace, resource ids, visibility name — never
+  message content or customer PII).
+- **Real-time readiness (Prompt 10)** — conversations are room-shaped
+  documents (`conversation:{id}`) with inbox-ordering indexes already in
+  place; message sends deliberately emit no events yet.
+
 ## Authentication (implemented)
 
 Short-lived **access JWTs** + long-lived **opaque rotating refresh tokens**:
