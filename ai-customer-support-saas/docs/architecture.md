@@ -94,6 +94,53 @@ Prompt 6 endpoints secured: `GET /workspaces/:id` (workspace.view),
 Membership administration endpoints are intentionally absent (later phase)
 but their policy layer, validators and audit hooks are ready.
 
+## Ticket management (Prompt 8, implemented)
+
+Every endpoint is workspace-scoped
+(`Base path: /api/v1/workspaces/:workspaceId/tickets`, gate:
+`requireAuth → validate(params) → requireWorkspaceContext →
+requirePermission`):
+
+```
+POST   /                     ticket.create
+GET    /                     ticket.read
+GET    /:ticketId            ticket.read
+PATCH  /:ticketId            ticket.update  + agent assignment CAP
+PATCH  /:ticketId/status     ticket.update  + lifecycle law
+PATCH  /:ticketId/assignment ticket.assign  (owner/admin only)
+PATCH  /:ticketId/priority   ticket.update  + agent assignment CAP
+POST   /:ticketId/resolve    ticket.update + RESOLVED transition (+ optional note)
+POST   /:ticketId/reopen     ticket.update + back-to-OPEN transition
+POST   /:ticketId/archive    ticket.update (soft-delete stamp)
+```
+
+- **Lifecycle law** (`TICKET_STATUS_TRANSITIONS` in `ticket.types.ts`) —
+  status changes are validated transitions only; illegal moves are 409
+  `INVALID_STATUS_TRANSITION` with the allowed targets in `details`. Closed
+  tickets may only return to OPEN. `resolvedAt`/`closedAt` are stamped on
+  entry and cleared on exit — the one deliberate exception: RESOLVED →
+  CLOSED retains `resolvedAt`. Resolve/reopen are idempotent-guided
+  transitions and audit nothing when no net change occurred.
+- **Agent cap** (`evaluateResourceModification`, `allowCreator: true`) —
+  agents may modify only tickets ASSIGNED to them or CREATED by them;
+  owner/admin pass as privileged triage roles; viewers have no update
+  permission at all. Assignees are verified as ACTIVE members of the SAME
+  workspace with an agent-or-above role (one uniform validation response —
+  no cross-workspace membership oracle).
+- **Tenant isolation** — the repository composes EVERY query from the
+  server-side `workspaceId`; tickets are never looked up globally and then
+  authorized. Foreign ticket ids read as 404 on any route. Server-side
+  cross-reference checks (customers, assignees) reject foreign ids with a
+  uniform not-found/validation contract.
+- **Numbering** — atomic per-workspace counter + unique
+  `{ workspaceId, number }` index; lost allocation races retry. Details in
+  the data-model doc.
+- **Audit actions** — `ticket.created`, `ticket.updated`,
+  `ticket.status_changed`, `ticket.assigned`/`ticket.unassigned`,
+  `ticket.priority_changed`, `ticket.resolved`, `ticket.reopened`,
+  `ticket.archived`. Metadata carries state names/ids and field NAMES only —
+  never subject/description/resolution-note/customer PII.
+
 Data-model details (collections, indexes, soft-delete decisions): see
 [docs/data-model.md](data-model.md).
 

@@ -29,6 +29,7 @@
     "verify:auth": "tsx scripts/verify-auth.ts",
     "verify:rbac": "tsx scripts/verify-rbac.ts",
     "verify:customers": "tsx scripts/verify-customers.ts",
+    "verify:tickets": "tsx scripts/verify-tickets.ts",
     "seed:dev": "tsx scripts/seed-dev-data.ts"
   },
   "devDependencies": {
