@@ -208,6 +208,169 @@ PATCH  …/conversations/:conversationId/messages/:messageId conversation.reply 
   documents (`conversation:{id}`) with inbox-ordering indexes already in
   place; message sends deliberately emit no events yet.
 
+## Knowledge base (Prompt 11, implemented)
+
+Workspace-scoped categories + articles + append-only revision history,
+mounted from `routes/api.routes.ts` (management gate: `requireAuth →
+validate(params) → requireWorkspaceContext → requirePermission('kb.manage'`
+or `'kb.view')):
+
+```
+POST   …/knowledge-base/categories                        kb.manage
+GET    …/knowledge-base/categories                        kb.view
+GET    …/knowledge-base/categories/:categoryId            kb.view
+PATCH  …/knowledge-base/categories/:categoryId            kb.manage
+POST   …/knowledge-base/categories/:categoryId/archive    kb.manage
+POST   …/knowledge-base/categories/:categoryId/restore    kb.manage
+POST   …/knowledge-base/articles                          kb.manage
+GET    …/knowledge-base/articles                          kb.view  (filter/sort/paginate)
+GET    …/knowledge-base/articles/:articleId               kb.view  (full detail incl. body)
+PATCH  …/knowledge-base/articles/:articleId               kb.manage
+POST   …/knowledge-base/articles/:articleId/publish       kb.manage
+POST   …/knowledge-base/articles/:articleId/unpublish     kb.manage
+POST   …/knowledge-base/articles/:articleId/archive       kb.manage
+POST   …/knowledge-base/articles/:articleId/restore       kb.manage
+GET    …/knowledge-base/articles/:articleId/revisions     kb.view  (history)
+GET    …/knowledge-base/articles/:articleId/revisions/:n  kb.view  (snapshot)
+POST   …/knowledge-base/articles/:articleId/revisions/:n/restore  kb.manage
+
+# PUBLIC (anonymous) — /api/v1/public/knowledge-base
+GET    /:workspaceSlug/categories        workspace-slug resolution; 404 otherwise
+GET    /:workspaceSlug/articles          ONLY status=PUBLISHED, public DTO
+GET    /:workspaceSlug/articles/:articleSlug  ONLY published slugs resolve
+```
+
+- **Permissions** — the existing registry grew by exactly two entries:
+  `kb.view` (owner/admin/agent/viewer — Viewer keeps read access and gets no
+  management power) and `kb.manage` (owner/admin only; agents do NOT manage
+  KB content by default — least privilege, extendable per workspace later).
+  No competing registry; denials still audit `workspace.permission_denied`.
+- **Category lifecycle** — soft archive/restore only; archive is REFUSED
+  (409 + counts in `details`) while live child categories or live articles
+  remain attached. Hierarchy is validated server-side: same-workspace live
+  parents only, depth cap 5, cycle/self-parent detection via an
+  ancestor-chain walk — all before any write. Renames re-derive the slug;
+  duplicates are caught by the case-insensitive service check and finally
+  by the DB unique index.
+- **Article lifecycle & revisions** — `DRAFT ⇄ PUBLISHED → ARCHIVED →
+  (restore) DRAFT` with per-transition 409s; archived articles refuse
+  edits/publishes (409). Content edits (title/summary/body/category/tags)
+  always allocate the next revision with an ATOMIC `$inc` and insert a full
+  snapshot BEFORE the article update (revise-first ordering); slugs and
+  lifecycle changes write NO revisions. Restoring an old revision creates a
+  NEW numbered snapshot (`restoredFromRevisionNumber`) — history is never
+  rewritten, and the revision model itself rejects updates/deletes (also
+  via `bulkWrite`). Query mounts: revision list reads are workspace-scoped,
+  so cross-tenant revision access is a uniform 404.
+- **Public reads** — a separate anonymous surface (`/api/v1/public/`).
+  No auth, no membership: safety comes from the workspace-slug lookup (404
+  concealment) and the hardcoded PUBLISHED-only predicate, mapped through
+  explicit public DTOs (id/title/slug/summary/tags/publishedAt + body and
+  categoryId on detail) — no status flags, author/editor ids, revision
+  pointers or draft/archived timestamps ever cross the public boundary.
+  Draft/archived content is unreachable both in lists and by slug. Anonymous
+  requests pass a dedicated 120 req/min IP rate limiter (tighter than the
+  global API backstop). No customer-portal auth exists yet — the public
+  surface is deliberately identity-free rather than inventing tokens.
+- **Search/filter** — server-side composition of allowlisted filters
+  (search/category/status/tags/author/createdFrom/createdTo/updatedFrom/
+  updatedTo) and a bounded allowlist of sort fields (title/createdAt/
+  updatedAt/publishedAt), capped pagination, escaped regex input; no raw
+  client query objects ever reach Mongo.
+- **Consistency (documented honestly)** — no multi-document transactions:
+  the allocate → snapshot-insert → article-update sequence is ordered
+  revision-first, each failure aborts loudly with specific error codes
+  (`KB_ARTICLE_UPDATE_FAILED`, `KB_RESTORE_FAILED`), and audit appends stay
+  fire-and-forget per project convention. See the data-model doc for the
+  full failure-mode narrative.
+- **Audit actions** — `kb.category.created/updated/archived/restored`,
+  `kb.article.created/updated/published/unpublished/archived/restored`,
+  `kb.article.revision_restored` (ids/slugs/field names/revision numbers
+  only — article bodies and titles never enter audit metadata).
+- **AI/RAG readiness (Prompts 13–15)** — the retrieval contract is already
+  fixed: published-only workspace predicate + stored markdown
+  title/summary/body/tags, with no embeddings/chunks stored on the model.
+  Future file ingestion (Prompt 12) adds a `documents` collection that can
+  reference `kb_articles` without schema changes.
+- **Verification** — KB behavior runs through the `npm run verify:kb`
+  end-to-end driver (in-memory mongod + the real Express app + real HTTP:
+  142 checks over authz, lifecycle, revisions, tenant isolation, public
+  reads, search and audit), alongside the existing
+  auth/workspace/RBAC/customer/ticket/conversation regression drivers.
+
+## Documents & file management (Prompt 12, implemented)
+
+Workspace-scoped file assets with a storage-driver seam, upload validation,
+server-side text extraction and a processing lifecycle. Mounted from
+`routes/api.routes.ts` under `/api/v1/workspaces/:workspaceId/files` (gate:
+`requireAuth → limiter/multipart → validate → requireWorkspaceContext →
+requirePermission`):
+
+```
+POST   /files                      document.manage  (dedicated 30/min/IP limiter)
+GET    /files                      document.view    (filter/sort/paginate)
+GET    /files/:fileId              document.view
+GET    /files/:fileId/download     document.view    (streamed, Content-Disposition)
+POST   /files/:fileId/reprocess    document.manage  (re-arms extraction)
+DELETE /files/:fileId              document.manage  (byte purge + audited tombstone)
+```
+
+- **Permissions** — two registry entries: `document.view` (owner/admin/agent;
+  deliberately NOT granted to viewer — file corpora and extraction output are
+  internal working material) and `document.manage` (owner/admin/agent — agents
+  attach evidence documents as part of working the desk). No competing
+  registry; denials keep the `workspace.permission_denied` audit convention.
+- **Upload validation is not trust-based** — client content types are INPUTS:
+  a closed media registry (`DOCUMENT_MEDIA_TYPES`) allowlists exactly
+  txt/md/csv/json/pdf/docx, binary families must carry their magic bytes
+  (declared-but-unmatched = 415 `MEDIA_MISMATCH`), text families containing
+  NUL bytes are rejected (`BINARY_MASQUERADING_AS_TEXT`), declared type vs
+  extension mismatch = 422. Filenames are sanitized metadata; the storage key
+  is composed SERVER-side (`workspaces/{ws}/files/{uuid}.{ext}`), so no client
+  value ever reaches a filesystem path. Multer errors translate to 413/422
+  (including multer/busboy truncated-multipart bodies → 422, not 500);
+  unknown multipart text fields are 422 (mass-assignment protection).
+- **Least privilege in the lifecycle** — files are PENDING → PROCESSING →
+  COMPLETED/FAILED with a separate extraction sub-status and a SAFE
+  `{code,message}` error (`message` never carries provider traces or content).
+- **Storage seam** — `StorageService` (`modules/documents/storage/`):
+  `putObject/getObject/deleteObject` for server-mediated flows plus presigned
+  upload/download reserved for a later direct-upload phase. Drivers: local
+  disk (development, `STORAGE_DATA_DIR`, key-shape re-validated, traversal
+  fails loudly; production use requires explicit
+  `STORAGE_ALLOW_LOCAL_PRODUCTION=true`) and S3 (AWS SDK, boot-guarded
+  credentials). The `local` driver hard-rejects presign calls
+  (501) rather than faking signed URLs.
+- **Extraction pipeline** — per-format extractors (plain text, JSON verbatim,
+  `pdf-parse`, `mammoth`) under `modules/documents/extraction/`, re-readable
+  by the Prompt 13–15 ingestion without the HTTP layer. Derived text is
+  bounded (`DOCUMENT_EXTRACTED_TEXT_MAX`, `extractedTextTruncated` flag) and
+  is the ONLY file content stored in MongoDB — bytes never enter the DB.
+- **Processing consistency (documented honestly)** — no job runner yet:
+  extraction runs in-process after the upload response, the PROCESSING claim
+  is an atomic expected-state transition (no double-processing), but the
+  claim/store/extract sequence is not atomic; a crash mid-extraction strands
+  PROCESSING (`POST /files/:fileId/reprocess` is the operator repair path
+  until the BullMQ phase owns retries/backoff). FAILED is terminal for this
+  prompt; reprocess also re-arms COMPLETED.
+- **Delete law** — DELETE purges stored bytes and stamps `deletedAt`
+  (tombstoned row stays for audit; default query scope hides purged rows,
+  `DOCUMENT_WITH_PURGED` opt-in for internals). Missing bytes on deletion are
+  idempotent-gone. Upload rows never point at missing bytes: `putObject`
+  happens BEFORE metadata and a failed metadata write best-effort-cleans up
+  the object (a leaked orphan retains no private value — workspace-namespaced key, private bucket).
+- **KB attach-point** — optional `articleId` is validated against the SAME
+  workspace server-side (foreign ids read as 404, no cross-tenant existence
+  oracle); files never accept or re-assign workspace/owner ids from the
+  client.
+- **Audit actions** — `document.uploaded / reprocessed / deleted` (ids,
+  sizes, media types, checksum fingerprints only — never filenames, so
+  user-controlled strings stay out of the compliance trail).
+- **Verification** — `npm run verify:files` end-to-end driver (real app,
+  real HTTP, both storage integration + extraction paths): 72 checks over
+  authz/RBAC, upload validation, size caps, sniffing, pagination/boundaries,
+  reprocess/delete, cross-tenant isolation and audit.
+
 ## Authentication (implemented)
 
 Short-lived **access JWTs** + long-lived **opaque rotating refresh tokens**:
@@ -284,10 +447,13 @@ imports an SDK directly.
 
 ## Storage seam
 
-`StorageService` interface with presigned upload/download + delete. Production
-driver: S3 (+ CloudFront for delivery, SSE for encryption, lifecycle rules for
-retention). Development driver: local disk — same interface, zero feature-code
-changes.
+`StorageService` interface (realized in `modules/documents/storage/` —
+server-mediated put/get/delete for the Prompt 12 upload/download flows,
+presigned upload/download reserved for a later direct-upload phase).
+Production driver: S3 (+ CloudFront for delivery, SSE for encryption,
+lifecycle rules for retention). Development driver: local disk — same
+interface, zero feature-code changes; local production is an explicit,
+boot-guarded decision (`STORAGE_ALLOW_LOCAL_PRODUCTION`).
 
 ## Security architecture
 

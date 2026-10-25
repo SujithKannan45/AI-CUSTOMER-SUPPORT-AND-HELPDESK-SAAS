@@ -7,6 +7,9 @@ import {
   ticketConversationRouter,
 } from '../modules/conversations/conversation.routes.js';
 import { customerRouter } from '../modules/customers/customer.routes.js';
+import { documentRouter } from '../modules/documents/document.routes.js';
+import { publicKnowledgeBaseRouter } from '../modules/knowledge-base/kb-public.routes.js';
+import { knowledgeBaseRouter } from '../modules/knowledge-base/kb.routes.js';
 import { ticketRouter } from '../modules/tickets/ticket.routes.js';
 import { workspaceRouter } from '../modules/workspaces/workspace.routes.js';
 
@@ -29,6 +32,18 @@ apiRouter.use('/workspaces/:workspaceId/tickets', ticketRouter);
 // parent's `:workspaceId` into every request).
 apiRouter.use('/workspaces/:workspaceId/tickets', ticketConversationRouter);
 apiRouter.use('/workspaces/:workspaceId/conversations', conversationRouter);
+// Knowledge Base routes nest under the SAME tenant context (mergeParams
+// carries the workspace param): `/knowledge-base/categories` and
+// `/knowledge-base/articles(…/revisions)` for staff, and a DETACHED public
+// read router under `/public/knowledge-base/:workspaceSlug` (anonymous,
+// published-only — see kb-public.routes.ts for the safety composition).
+apiRouter.use('/workspaces/:workspaceId/knowledge-base', knowledgeBaseRouter);
+// Document/file routes nest under the SAME workspace tenant context: the
+// router itself owns the `/files…` subpaths (uploads, downloads and
+// processing-state reads). No public file surface exists — file bytes are
+// only behind authenticated routes.
+apiRouter.use('/workspaces/:workspaceId', documentRouter);
+apiRouter.use('/public/knowledge-base', publicKnowledgeBaseRouter);
 // Customer routes nest under the workspace tenant context:
 // `/api/v1/workspaces/:workspaceId/customers` carries the parent's
 // `:workspaceId` param (mergeParams) so every customer request is scoped by

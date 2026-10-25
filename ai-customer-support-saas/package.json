@@ -31,6 +31,8 @@
     "verify:customers": "tsx scripts/verify-customers.ts",
     "verify:tickets": "tsx scripts/verify-tickets.ts",
     "verify:conversations": "tsx scripts/verify-conversations.ts",
+    "verify:kb": "tsx scripts/verify-knowledge-base.ts",
+    "verify:files": "tsx scripts/verify-files.ts",
     "seed:dev": "tsx scripts/seed-dev-data.ts"
   },
   "devDependencies": {

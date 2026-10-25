@@ -92,11 +92,21 @@ const envSchema = z.object({
   /** Browser URL of the SPA — used for CORS allow-list and future email links. */
   CLIENT_URL: z.string().url().default('http://localhost:5173'),
 
-  /** ── AWS (future phase) ─────────────────────────────────────────────────── */
+  /** ── AWS (previous phase; consumed by the S3 storage driver) ──────────────── */
   AWS_REGION: optionalNonEmptyString,
   AWS_ACCESS_KEY_ID: optionalNonEmptyString,
   AWS_SECRET_ACCESS_KEY: optionalNonEmptyString,
   S3_BUCKET_DOCUMENTS: optionalNonEmptyString,
+
+  /** ── Document/file storage (Prompt 12) ───────────────────────────────── */
+  /** "local" = disk driver (dev default); "s3" = production driver. */
+  STORAGE_PROVIDER: z.enum(['local', 's3']).default('local'),
+  /** Root directory for the local driver (ignored by the s3 provider). */
+  STORAGE_DATA_DIR: z.string().min(1).default('./data/files'),
+  /** Hard cap per uploaded file (rejected allocates nothing in storage). */
+  FILE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
+  /** Dev escape hatch allowing the disk driver in production (explicit opt-in). */
+  STORAGE_ALLOW_LOCAL_PRODUCTION: z.enum(['true', 'false']).default('false'),
 
   /** ── AI providers (future phase) ────────────────────────────────────────── */
   AI_PROVIDER: z.enum(['openai', 'gemini', 'bedrock', 'none']).default('none'),
@@ -136,6 +146,24 @@ if (isProduction && env.EMAIL_PROVIDER !== 'log' && env.EMAIL_FROM_ADDRESS === u
 if (isProduction && env.EMAIL_PROVIDER === 'log') {
   productionFailures.push(
     'EMAIL_PROVIDER="log" is a development-only outbox and must not run in production.',
+  );
+}
+if (isProduction && env.STORAGE_PROVIDER === 's3') {
+  const missingAws = [
+    'AWS_REGION',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    'S3_BUCKET_DOCUMENTS',
+  ].filter((key) => process.env[key] === undefined || process.env[key] === '');
+  if (missingAws.length > 0) {
+    productionFailures.push(
+      `STORAGE_PROVIDER=s3 requires these variables in production: ${missingAws.join(', ')}.`,
+    );
+  }
+}
+if (isProduction && env.STORAGE_PROVIDER === 'local' && env.STORAGE_ALLOW_LOCAL_PRODUCTION !== 'true') {
+  productionFailures.push(
+    'STORAGE_PROVIDER=local is not nil-safe for production: set STORAGE_PROVIDER=s3 (with the AWS_* variables) or explicitly opt in with STORAGE_ALLOW_LOCAL_PRODUCTION=true.',
   );
 }
 

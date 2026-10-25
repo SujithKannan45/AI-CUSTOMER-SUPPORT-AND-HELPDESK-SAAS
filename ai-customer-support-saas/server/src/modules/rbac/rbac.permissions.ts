@@ -50,8 +50,14 @@ export const WORKSPACE_PERMISSIONS = {
   viewConversations: 'conversation.view',
   /** Send replies in conversations. */
   replyToConversations: 'conversation.reply',
-  /** Create/edit/delete knowledge-base articles and workspace documents. */
+  /** Read knowledge-base content: articles, categories and revision history. */
+  viewKnowledgeBase: 'kb.view',
+  /** Create/edit/publish/archive knowledge-base articles and categories, and restore revisions. */
   manageKnowledgeBase: 'kb.manage',
+  /** Read document/file metadata and extracted text (documents module, Prompt 12). */
+  viewDocuments: 'document.view',
+  /** Upload/download documents, re-run text extraction, delete documents. */
+  manageDocuments: 'document.manage',
   /** Viewing workspace analytics dashboards. */
   viewAnalytics: 'analytics.view',
   /** Workspace-level security settings (security keys, workspace-wide policies). */
@@ -83,13 +89,15 @@ type P = readonly WorkspacePermission[];
  * - `agent` — exactly what desk work needs: read customers, work tickets
  *   (create/update capped to assigned resources by resource-access.ts),
  *   reply in conversations. No membership admin, no analytics, no customer
- *   registry edits, no KB management, no settings — support work must not
- *   imply administration.
+ *   registry edits, no KB MANAGEMENT (read-only KB: authoring/publishing is a
+ *   knowledge-ownership decision, not desk work), no settings — support work
+ *   must not imply administration.
  * - `viewer` — strictly read access to explicitly permitted information
- *   (workspace details, member directory, customers, tickets, conversations).
- *   Nothing mutating; analytics excluded because aggregates leak business
- *   trends beyond what "view a ticket" means, and membership listing stays
- *   allowed as directory-visibility, not administration.
+ *   (workspace details, member directory, customers, tickets, conversations,
+ *   knowledge-base content). Nothing mutating; analytics excluded because
+ *   aggregates leak business trends beyond what "view a ticket" means, and
+ *   membership listing stays allowed as directory-visibility, not
+ *   administration.
  */
 const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
   owner: [
@@ -106,7 +114,10 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.assignTicket,
     WORKSPACE_PERMISSIONS.viewConversations,
     WORKSPACE_PERMISSIONS.replyToConversations,
+    WORKSPACE_PERMISSIONS.viewKnowledgeBase,
     WORKSPACE_PERMISSIONS.manageKnowledgeBase,
+    WORKSPACE_PERMISSIONS.viewDocuments,
+    WORKSPACE_PERMISSIONS.manageDocuments,
     WORKSPACE_PERMISSIONS.viewAnalytics,
     WORKSPACE_PERMISSIONS.manageWorkspaceSecurity,
   ],
@@ -124,7 +135,10 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.assignTicket,
     WORKSPACE_PERMISSIONS.viewConversations,
     WORKSPACE_PERMISSIONS.replyToConversations,
+    WORKSPACE_PERMISSIONS.viewKnowledgeBase,
     WORKSPACE_PERMISSIONS.manageKnowledgeBase,
+    WORKSPACE_PERMISSIONS.viewDocuments,
+    WORKSPACE_PERMISSIONS.manageDocuments,
     WORKSPACE_PERMISSIONS.viewAnalytics,
   ],
   agent: [
@@ -136,6 +150,9 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.updateTicket,
     WORKSPACE_PERMISSIONS.viewConversations,
     WORKSPACE_PERMISSIONS.replyToConversations,
+    WORKSPACE_PERMISSIONS.viewKnowledgeBase,
+    WORKSPACE_PERMISSIONS.viewDocuments,
+    WORKSPACE_PERMISSIONS.manageDocuments,
   ],
   viewer: [
     WORKSPACE_PERMISSIONS.viewWorkspace,
@@ -143,6 +160,7 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.viewCustomers,
     WORKSPACE_PERMISSIONS.viewTickets,
     WORKSPACE_PERMISSIONS.viewConversations,
+    WORKSPACE_PERMISSIONS.viewKnowledgeBase,
   ],
 };
 

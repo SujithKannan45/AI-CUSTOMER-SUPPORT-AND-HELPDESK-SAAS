@@ -12,6 +12,10 @@ coverage/
 .env.*
 !.env.example
 
+# ── Local storage data (documents module dev driver) ──
+server/data/
+data/
+
 # ── Logs ────────────────────────────────────────
 logs/
 *.log
