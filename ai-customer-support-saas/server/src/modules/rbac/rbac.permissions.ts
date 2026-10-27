@@ -58,6 +58,10 @@ export const WORKSPACE_PERMISSIONS = {
   viewDocuments: 'document.view',
   /** Upload/download documents, re-run text extraction, delete documents. */
   manageDocuments: 'document.manage',
+  /** Read RAG indexing status and the chunk inventory (Prompt 13, AI pipeline internals). */
+  viewRag: 'rag.view',
+  /** Trigger indexing/reindexing and purge indexed chunks (Prompt 13). */
+  indexRag: 'rag.index',
   /** Viewing workspace analytics dashboards. */
   viewAnalytics: 'analytics.view',
   /** Workspace-level security settings (security keys, workspace-wide policies). */
@@ -118,6 +122,8 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.manageKnowledgeBase,
     WORKSPACE_PERMISSIONS.viewDocuments,
     WORKSPACE_PERMISSIONS.manageDocuments,
+    WORKSPACE_PERMISSIONS.viewRag,
+    WORKSPACE_PERMISSIONS.indexRag,
     WORKSPACE_PERMISSIONS.viewAnalytics,
     WORKSPACE_PERMISSIONS.manageWorkspaceSecurity,
   ],
@@ -139,6 +145,8 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.manageKnowledgeBase,
     WORKSPACE_PERMISSIONS.viewDocuments,
     WORKSPACE_PERMISSIONS.manageDocuments,
+    WORKSPACE_PERMISSIONS.viewRag,
+    WORKSPACE_PERMISSIONS.indexRag,
     WORKSPACE_PERMISSIONS.viewAnalytics,
   ],
   agent: [

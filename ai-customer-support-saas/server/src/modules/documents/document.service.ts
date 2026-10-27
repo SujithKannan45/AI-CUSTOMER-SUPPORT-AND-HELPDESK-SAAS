@@ -5,6 +5,7 @@ import { Types } from 'mongoose';
 import { AppError } from '../../core/errors/app-error.js';
 import { logger } from '../../core/logger/logger.js';
 import { findArticleInWorkspace } from '../knowledge-base/kb-article.repository.js';
+import { scheduleSourceChunkPurge } from '../rag/rag.triggers.js';
 
 import {
   recordDocumentAudit,
@@ -262,6 +263,10 @@ export async function deleteDocumentFlow(
   });
 
   await purgeDocumentMetadata(workspaceId, selfId, actorId);
+
+  // RAG projection (Prompt 13) — the source is gone; its chunks must not
+  // outlive it (fire-safe purge, idempotent).
+  scheduleSourceChunkPurge(context.workspaceId, 'DOCUMENT', fileId);
 
   recordDocumentAudit({
     action: DOCUMENT_AUDIT_ACTIONS.documentDeleted,

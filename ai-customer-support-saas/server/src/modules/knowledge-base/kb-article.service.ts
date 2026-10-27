@@ -2,6 +2,11 @@ import { Types } from 'mongoose';
 
 import { AppError } from '../../core/errors/app-error.js';
 import { logger } from '../../core/logger/logger.js';
+import {
+  scheduleArticleChunkIndexing,
+  scheduleSourceChunkIneligibility,
+  scheduleSourceChunkPurge,
+} from '../rag/rag.triggers.js';
 import { normalizeSlug, isValidSlug, slugValidationError, slugifyName } from '../workspaces/slug.js';
 
 
@@ -434,6 +439,12 @@ export async function updateArticleFlow(
         metadata: { fields: changedFields, revisionNumber },
       });
 
+      // A PUBLISHED article's content changed: let the RAG projection catch
+      // up fire-safe (chunking + reindex are idempotent by design).
+      if (updated.status === 'PUBLISHED') {
+        scheduleArticleChunkIndexing(workspaceId.toHexString(), selfId.toHexString());
+      }
+
       const refreshed = await findArticleInWorkspace(workspaceId, selfId);
       return toArticleDto(refreshed ?? updated);
     } catch (error) {
@@ -522,6 +533,21 @@ export async function articleLifecycleFlow(
     resourceId: result._id.toHexString(),
     metadata: { from: transition.from, to: transition.to },
   });
+
+  // RAG projection (Prompt 13) — fire-safe, per-source lifecycle wiring.
+  switch (transition.to) {
+    case 'PUBLISHED':
+      scheduleArticleChunkIndexing(workspaceId.toHexString(), selfId.toHexString());
+      break;
+    case 'ARCHIVED':
+      scheduleSourceChunkPurge(workspaceId.toHexString(), 'KB_ARTICLE', selfId.toHexString());
+      break;
+    case 'DRAFT':
+      // Unpublish/restore → hide from retrieval cheaply (a republish reuses
+      // the stored embeddings via the text-hash path).
+      scheduleSourceChunkIneligibility(workspaceId.toHexString(), 'KB_ARTICLE', selfId.toHexString());
+      break;
+  }
 
   return toArticleDto(result);
 }
@@ -645,6 +671,12 @@ export async function restoreRevisionFlow(
       articleId: selfId.toHexString(),
     },
   });
+
+  // A revision restore rewrites the CURRENT content of the article — the RAG
+  // projection follows it when the article is live-published (fire-safe).
+  if (updated.status === 'PUBLISHED') {
+    scheduleArticleChunkIndexing(workspaceId.toHexString(), selfId.toHexString());
+  }
 
   return { revision: toRevisionDto(revision) };
 }

@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 
 import { AppError } from '../../core/errors/app-error.js';
 import { logger } from '../../core/logger/logger.js';
+import { scheduleDocumentChunkIndexing } from '../rag/rag.triggers.js';
 
 import {
   claimDocumentForProcessing,
@@ -101,6 +102,13 @@ async function runExtractionOnce(
     });
     if (updated === null) {
       throw new Error('processing update found no live document');
+    }
+
+    // RAG projection (Prompt 13) — extraction completed with usable text:
+    // fire-safe auto-indexing (no-op when no embedding provider is set).
+    const extracted = capped?.text ?? '';
+    if (extracted.trim().length > 0) {
+      scheduleDocumentChunkIndexing(workspaceId, documentId);
     }
   } catch (error: unknown) {
     const typed = error instanceof ExtractionError ? error : undefined;

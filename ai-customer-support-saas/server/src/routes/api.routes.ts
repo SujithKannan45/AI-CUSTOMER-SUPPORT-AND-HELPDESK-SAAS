@@ -10,6 +10,7 @@ import { customerRouter } from '../modules/customers/customer.routes.js';
 import { documentRouter } from '../modules/documents/document.routes.js';
 import { publicKnowledgeBaseRouter } from '../modules/knowledge-base/kb-public.routes.js';
 import { knowledgeBaseRouter } from '../modules/knowledge-base/kb.routes.js';
+import { ragRouter } from '../modules/rag/rag.routes.js';
 import { ticketRouter } from '../modules/tickets/ticket.routes.js';
 import { workspaceRouter } from '../modules/workspaces/workspace.routes.js';
 
@@ -43,6 +44,11 @@ apiRouter.use('/workspaces/:workspaceId/knowledge-base', knowledgeBaseRouter);
 // processing-state reads). No public file surface exists — file bytes are
 // only behind authenticated routes.
 apiRouter.use('/workspaces/:workspaceId', documentRouter);
+// RAG management routes (Prompt 13) nest under the SAME tenant context:
+// `/rag/status`, `/rag/chunks` and the per-source index/purge endpoints.
+// Retrieval itself stays an internal service until an authorized API pattern
+// (Prompt 14's answer surface) consumes it.
+apiRouter.use('/workspaces/:workspaceId/rag', ragRouter);
 apiRouter.use('/public/knowledge-base', publicKnowledgeBaseRouter);
 // Customer routes nest under the workspace tenant context:
 // `/api/v1/workspaces/:workspaceId/customers` carries the parent's

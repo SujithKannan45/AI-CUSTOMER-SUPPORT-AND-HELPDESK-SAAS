@@ -112,7 +112,42 @@ const envSchema = z.object({
   AI_PROVIDER: z.enum(['openai', 'gemini', 'bedrock', 'none']).default('none'),
   OPENAI_API_KEY: optionalNonEmptyString,
   GEMINI_API_KEY: optionalNonEmptyString,
-});
+
+  /** ── AI/RAG foundation (Prompt 13) ── */
+  /** Embedding provider: "none" (default — indexing stays dormant), "openai", or "mock" (tests/dev ONLY — forbidden in production). */
+  RAG_EMBEDDING_PROVIDER: z.enum(['none', 'openai', 'mock']).default('none'),
+  /** Embedding model id for the selected provider (openai adapter payload field). */
+  RAG_EMBEDDING_MODEL: z.string().min(1).default('text-embedding-3-small'),
+  /** Vector dimensionality — MUST match the vector store; stored per chunk. */
+  RAG_EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().max(4096).default(1536),
+  /** Max texts per embedding API call. */
+  RAG_EMBEDDING_BATCH_SIZE: z.coerce.number().int().positive().max(2048).default(64),
+  /** Per-call embedding provider timeout in ms. */
+  RAG_EMBEDDING_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  /** Max characters per embedding API input (provider input guards). */
+  RAG_EMBEDDING_INPUT_MAX_CHARS: z.coerce.number().int().positive().default(8000),
+  /** OpenAI-compatible embeddings endpoint base (no secret; proxy-friendly). */
+  RAG_OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
+  /** Vector search implementation: "none" (default), "atlas", or "inmemory" (tests/dev ONLY — forbidden in production unless explicitly allowed). */
+  RAG_VECTOR_SEARCH: z.enum(['none', 'atlas', 'inmemory']).default('none'),
+  /** Atlas Search index name on the rag_chunks collection (created manually on Atlas). */
+  RAG_ATLAS_VECTOR_INDEX: z.string().min(1).default('rag_chunks_vector'),
+  /** Escape hatch for forcing the o(N)-scan in-memory store in production; never used by default. */
+  RAG_ALLOW_INMEMORY_VECTOR_PRODUCTION: z.enum(['true', 'false']).default('false'),
+  /** Retrieval bounds: query length, max results per retrieval call, similarity floor (0 = off). */
+  RAG_QUERY_MAX_LENGTH: z.coerce.number().int().positive().default(1000),
+  RAG_MAX_RETRIEVE_LIMIT: z.coerce.number().int().positive().max(100).default(10),
+  RAG_MIN_SCORE: z.coerce.number().min(0).max(1).default(0),
+  /** Chunking bounds: chunk size and cross-chunk overlap (overlap MUST be strictly smaller than chunk size). */
+  RAG_CHUNK_MAX_CHARS: z.coerce.number().int().positive().default(1_200),
+  RAG_CHUNK_OVERLAP_CHARS: z.coerce.number().int().min(0).default(150),
+  /** Hard input cap before chunking (protects memory; sources stay bounded upstream). */
+  RAG_MAX_SOURCE_CHARS: z.coerce.number().int().positive().default(300_000),
+})
+  .refine(
+    (value) => value['RAG_CHUNK_OVERLAP_CHARS'] < value['RAG_CHUNK_MAX_CHARS'],
+    { path: ['RAG_CHUNK_OVERLAP_CHARS'], message: 'must be strictly smaller than the chunk size' },
+  );
 
 export type Env = z.infer<typeof envSchema>;
 
@@ -164,6 +199,25 @@ if (isProduction && env.STORAGE_PROVIDER === 's3') {
 if (isProduction && env.STORAGE_PROVIDER === 'local' && env.STORAGE_ALLOW_LOCAL_PRODUCTION !== 'true') {
   productionFailures.push(
     'STORAGE_PROVIDER=local is not nil-safe for production: set STORAGE_PROVIDER=s3 (with the AWS_* variables) or explicitly opt in with STORAGE_ALLOW_LOCAL_PRODUCTION=true.',
+  );
+}
+if (isProduction && env.RAG_EMBEDDING_PROVIDER === 'mock') {
+  productionFailures.push(
+    'RAG_EMBEDDING_PROVIDER=mock is a deterministic test/dev provider: it must not run in production (use "openai" with OPENAI_API_KEY, or "none").',
+  );
+}
+if (isProduction && env.RAG_EMBEDDING_PROVIDER === 'openai' && env.OPENAI_API_KEY === undefined) {
+  productionFailures.push(
+    'RAG_EMBEDDING_PROVIDER=openai requires OPENAI_API_KEY in production (or set RAG_EMBEDDING_PROVIDER=none).',
+  );
+}
+if (
+  isProduction &&
+  env.RAG_VECTOR_SEARCH === 'inmemory' &&
+  env.RAG_ALLOW_INMEMORY_VECTOR_PRODUCTION !== 'true'
+) {
+  productionFailures.push(
+    'RAG_VECTOR_SEARCH=inmemory performs an o(N) scan and is for tests/dev only: use Atlas Vector Search (RAG_VECTOR_SEARCH=atlas) or explicitly opt in with RAG_ALLOW_INMEMORY_VECTOR_PRODUCTION=true.',
   );
 }
 

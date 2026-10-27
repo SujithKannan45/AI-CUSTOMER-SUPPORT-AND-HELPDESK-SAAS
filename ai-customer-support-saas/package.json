@@ -33,6 +33,7 @@
     "verify:conversations": "tsx scripts/verify-conversations.ts",
     "verify:kb": "tsx scripts/verify-knowledge-base.ts",
     "verify:files": "tsx scripts/verify-files.ts",
+    "verify:rag": "tsx scripts/verify-rag.ts",
     "seed:dev": "tsx scripts/seed-dev-data.ts"
   },
   "devDependencies": {
