@@ -21,6 +21,7 @@ management in `server/src/database/database.ts`.
 | `kb_article_revisions` | `modules/knowledge-base`                  | Yes           | Never (append-only, immutable) | Full content snapshots (title/summary/body/category/tags); unique `{ workspaceId, articleId, revisionNumber }` |
 | `file_assets`      | `modules/documents`                           | Yes           | **Yes** (`deletedAt` tombstone after byte purge) | Uploaded-file METADATA only — bytes live behind the `StorageService` seam; processing `status` + `extractionStatus` + bounded `extractedText`; optional `articleId` attach-point |
 | `audit_logs`       | `modules/audit-logs`                          | Yes (platform scope reserved) | Never | Append-only; updates/deletes rejected at model layer |
+| `rag_chunks`       | `modules/rag`                                 | Yes           | No (purged on source lifecycle) | One document per indexed chunk (Prompt 13); sources = PUBLISHED kb_articles + COMPLETED-extraction file_assets only; tenant scope applies INSIDE retrieval queries |
 | `refresh_tokens`   | `modules/auth`                                | No (per user) | Revocation  | One row per active session; SHA-256 **hash only**, rotation chain via `familyId` |
 | `auth_tokens`      | `modules/auth`                                | No (per email) | Consumed/expiry | One-time verify-email / password-reset tokens, hashed at rest |
 
@@ -323,6 +324,30 @@ server-side).
 - **Audit** — `document.uploaded/reprocessed/deleted` carry ids, media
   types, sizes and checksum fingerprints ONLY — original filenames are
   user-controlled strings and never enter the audit trail.
+
+## RAG chunk collection (added in the AI/RAG phase)
+
+- **`rag_chunks`** (`modules/rag`) — one document per indexed chunk:
+  `workspaceId`, `sourceType` (`KB_ARTICLE | DOCUMENT`), `sourceId`,
+  `chunkIndex`, `text`, `textLength`, `textHash` (sha-256), `sourceHash`,
+  `embedding` (in-memory store), `embeddingStatus` + `embeddingModel`,
+  `createdAt`/`updatedAt`. Chunks derive ONLY from eligible sources
+  (published articles, fully-extracted documents); every write embeds its
+  source's content hash so reindexing is idempotent and obsolete chunks are
+  purged on source update/delete/unpublish. Indexes:
+  `{ workspaceId, sourceType, sourceId, chunkIndex }` (unique — the dedupe
+  key), `{ workspaceId, textHash }` (dedupe forensics),
+  `{ workspaceId, embeddingStatus, sourceType }` (failed-embedding repair
+  queue), `{ workspaceId, sourceType, sourceEligible }` (eligibility
+  counts), `{ workspaceId, sourceId, sourceHash }` (reindex short-circuit).
+  Tenant + eligibility filters are applied INSIDE retrieval, never client-side. Agent audits reuse the same
+  append-only `audit_logs` collection (`agent.question_answered` —
+  outcome/reason/counts only; no question or answer text).
+- **Verification** — `npm run verify:agent` (48/48) boots the REAL app
+  against the documented local fixtures (in-memory Mongo + mock embedding
+  + in-memory vector store) and injects the deterministic mock chat via
+  the factory test seam; retrieval work is mocked-only, live OpenAI and
+  Atlas Vector Search remain UNVERIFIED until credentials exist.
 
 ## Soft-delete decisions
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { env } from '../config/env.config.js';
+import { agentRouter } from '../modules/agent/agent.routes.js';
 import { authRouter } from '../modules/auth/auth.routes.js';
 import {
   conversationRouter,
@@ -49,6 +50,11 @@ apiRouter.use('/workspaces/:workspaceId', documentRouter);
 // Retrieval itself stays an internal service until an authorized API pattern
 // (Prompt 14's answer surface) consumes it.
 apiRouter.use('/workspaces/:workspaceId/rag', ragRouter);
+// AI support agent (Prompt 14) under the SAME tenant context:
+// `/agent/ask` — staff-only grounded question answering. Retrieval stays the
+// Prompt 13 internal service; there is deliberately NO customer-facing agent
+// route until customer-portal authentication exists (documented limitation).
+apiRouter.use('/workspaces/:workspaceId/agent', agentRouter);
 apiRouter.use('/public/knowledge-base', publicKnowledgeBaseRouter);
 // Customer routes nest under the workspace tenant context:
 // `/api/v1/workspaces/:workspaceId/customers` carries the parent's

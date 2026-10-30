@@ -136,11 +136,15 @@ async function main(): Promise<void> {
   }
 
   const httpServer = await startServer();
+  // After memoryServer.stop() the Mongo driver topology keeps an automatic
+  // reconnect loop alive, which holds the Node event loop open forever — so
+  // explicitly disconnect mongoose once the in-memory server is gone.
+  const mongooseModule = await import('mongoose');
   const shutdown = (): Promise<void> =>
     Promise.all([
       new Promise<void>((resolve) => httpServer.close(() => resolve())),
       memoryServer.stop(),
-    ]).then(() => undefined);
+    ]).then(() => mongooseModule.disconnect());
 
   try {
     const api = (pathSegments: string): string => `http://127.0.0.1:${port}/api/v1${pathSegments}`;

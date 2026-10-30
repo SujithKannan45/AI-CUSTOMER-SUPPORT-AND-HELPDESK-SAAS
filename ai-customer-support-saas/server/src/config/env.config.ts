@@ -108,10 +108,42 @@ const envSchema = z.object({
   /** Dev escape hatch allowing the disk driver in production (explicit opt-in). */
   STORAGE_ALLOW_LOCAL_PRODUCTION: z.enum(['true', 'false']).default('false'),
 
-  /** ── AI providers (future phase) ────────────────────────────────────────── */
+  /**
+   * Generation (chat) provider for the support agent (Prompt 14). "none"
+   * (default) keeps agent endpoints safely unconfigured; "openai" uses the
+   * OpenAI-compatible chat API; "gemini"/"bedrock" are RESERVED enum values
+   * whose adapters are not implemented yet — the factory surfaces the same
+   * safe "not configured" behavior until their adapters exist.
+   */
   AI_PROVIDER: z.enum(['openai', 'gemini', 'bedrock', 'none']).default('none'),
   OPENAI_API_KEY: optionalNonEmptyString,
   GEMINI_API_KEY: optionalNonEmptyString,
+
+  /** ── AI support agent (Prompt 14) ────────────────────────────────────── */
+  /** OpenAI-compatible chat endpoint base (proxy-friendly, like RAG_OPENAI_BASE_URL). */
+  AI_CHAT_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
+  /** Generation model id for the chat provider (configurable; live behavior must be verified before production use). */
+  AI_CHAT_MODEL: z.string().min(1).default('gpt-4o-mini'),
+  /** Per-call chat provider timeout in ms. */
+  AI_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+  /** Hard max completion tokens requested per generation call. */
+  AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().max(4096).default(512),
+  /** Question length bound (abuse guard). */
+  AI_AGENT_QUESTION_MAX_CHARS: z.coerce.number().int().positive().default(2_000),
+  /** Conversation-history grounding bounds (PUBLIC messages only — never internal notes). */
+  AI_AGENT_HISTORY_MAX_MESSAGES: z.coerce.number().int().positive().max(50).default(10),
+  AI_AGENT_HISTORY_MESSAGE_MAX_CHARS: z.coerce.number().int().positive().default(2_000),
+  /** Answerability policy uses only evidence the application can measure. */
+  /** Minimum passages that must survive retrieval for a grounded answer. */
+  AI_AGENT_MIN_PASSAGES: z.coerce.number().int().positive().default(1),
+  /** Minimum similarity score of the best retrieved passage (0 disables the floor). */
+  AI_AGENT_MIN_CONTEXT_SCORE: z.coerce.number().min(0).max(1).default(0.1),
+  /** Passages admitted into the generation context (must not exceed the retrieval max). */
+  AI_AGENT_CONTEXT_MAX_PASSAGES: z.coerce.number().int().positive().default(5),
+  /** Total characters of passage text admitted into the generation context. */
+  AI_AGENT_CONTEXT_MAX_CHARS: z.coerce.number().int().positive().default(6_000),
+  /** Returned-answer length cap (provider output is truncated to this bound). */
+  AI_AGENT_ANSWER_MAX_CHARS: z.coerce.number().int().positive().default(2_000),
 
   /** ── AI/RAG foundation (Prompt 13) ── */
   /** Embedding provider: "none" (default — indexing stays dormant), "openai", or "mock" (tests/dev ONLY — forbidden in production). */
@@ -147,6 +179,13 @@ const envSchema = z.object({
   .refine(
     (value) => value['RAG_CHUNK_OVERLAP_CHARS'] < value['RAG_CHUNK_MAX_CHARS'],
     { path: ['RAG_CHUNK_OVERLAP_CHARS'], message: 'must be strictly smaller than the chunk size' },
+  )
+  .refine(
+    (value) => value['AI_AGENT_CONTEXT_MAX_PASSAGES'] <= value['RAG_MAX_RETRIEVE_LIMIT'],
+    {
+      path: ['AI_AGENT_CONTEXT_MAX_PASSAGES'],
+      message: 'must not exceed RAG_MAX_RETRIEVE_LIMIT — retrieval can never admit more passages than one search returns',
+    },
   );
 
 export type Env = z.infer<typeof envSchema>;
@@ -199,6 +238,11 @@ if (isProduction && env.STORAGE_PROVIDER === 's3') {
 if (isProduction && env.STORAGE_PROVIDER === 'local' && env.STORAGE_ALLOW_LOCAL_PRODUCTION !== 'true') {
   productionFailures.push(
     'STORAGE_PROVIDER=local is not nil-safe for production: set STORAGE_PROVIDER=s3 (with the AWS_* variables) or explicitly opt in with STORAGE_ALLOW_LOCAL_PRODUCTION=true.',
+  );
+}
+if (isProduction && env.AI_PROVIDER === 'openai' && env.OPENAI_API_KEY === undefined) {
+  productionFailures.push(
+    'AI_PROVIDER=openai requires OPENAI_API_KEY in production (or set AI_PROVIDER=none).',
   );
 }
 if (isProduction && env.RAG_EMBEDDING_PROVIDER === 'mock') {

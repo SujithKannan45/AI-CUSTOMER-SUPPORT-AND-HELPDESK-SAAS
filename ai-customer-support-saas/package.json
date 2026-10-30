@@ -34,6 +34,7 @@
     "verify:kb": "tsx scripts/verify-knowledge-base.ts",
     "verify:files": "tsx scripts/verify-files.ts",
     "verify:rag": "tsx scripts/verify-rag.ts",
+    "verify:agent": "tsx scripts/verify-agent.ts",
     "seed:dev": "tsx scripts/seed-dev-data.ts"
   },
   "devDependencies": {

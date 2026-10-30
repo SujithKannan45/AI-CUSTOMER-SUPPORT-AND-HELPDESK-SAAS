@@ -371,6 +371,94 @@ DELETE /files/:fileId              document.manage  (byte purge + audited tombst
   authz/RBAC, upload validation, size caps, sniffing, pagination/boundaries,
   reprocess/delete, cross-tenant isolation and audit.
 
+## Knowledge retrieval — RAG foundation (Prompt 13, implemented)
+
+Grounding data lives in a dedicated `rag_chunks` collection (`modules/rag/`)
+with one document per chunk: workspaceId, sourceType (`KB_ARTICLE | DOCUMENT`),
+sourceId, chunk text + index + sha-256 hash, embedding status/metadata, and
+timestamps. Every lookup is workspace-scoped INSIDE the query; chunks derive
+ONLY from published KB articles and fully-extracted documents (spec: never
+failed, incomplete, archived or ineligible sources).
+
+- **Chunking** — `chunkSourceText` (pure module): normalization →
+  paragraph/heading-shaped blocks → size-capped chunks with overlap → stable
+  hashes; oversized sources are REJECTED, never silently truncated. The
+  same hashes are the reindex dedupe keys (idempotent reprocessing).
+- **Embeddings** — `EmbeddingProvider` interface; `openai` adapter
+  (OpenAI-compatible, batched, validated, timeout-guarded) and a
+  deterministic sha-256/xorshift `mock` provider (tests/dev ONLY —
+  production boot refuses it). Defaults conservatively to `none`.
+- **Vector stores** — `VectorStore` interface. `atlas` adapter for MongoDB
+  Atlas Vector Search (requires a MANUALLY created Atlas Search vector
+  index on `rag_chunks`, name via `RAG_ATLAS_VECTOR_INDEX`); `inmemory`
+  store (tests/dev ONLY, boot-refused in production) which embeds vectors
+  in Mongo documents and does an o(N) filtered scan. Defaults to `none`.
+- **Indexing lifecycle** — `rag-indexing.service` + `rag.triggers`: publish
+  / publish-unpublish / reprocess / replace / delete lifecycle hooks auto-
+  index or purge chunks; `sourceTextSha256` short-circuits unchanged
+  sources. In-process (no queue): a failed hook never corrupts the source
+  flow, and BullMQ remains a prepared future integration (see below).
+- **Retrieval** — `retrievePassages` (internal service, no HTTP surface):
+  validated inputs, configured provider, store-level tenant + eligibility
+  filtering, bounded results, safe coded failures.
+- **Verification** — `npm run verify:rag` (48/48 and full retrieval-
+  pipeline integration); pure drivers cover chunking/grounding without a
+  database. NOTE for local drivers: after `memoryServer.stop()` the Mongo
+  driver's auto-reconnect loop would keep the Node event loop alive
+  forever — the drivers explicitly `mongoose.disconnect()` to exit cleanly.
+
+## AI support agent (Prompt 14, implemented)
+
+`POST /api/v1/workspaces/:workspaceId/agent/ask` (staff `agent.ask`
+permission: owner/admin/agent — viewer excluded because each call may spend
+provider credits; separate 10/min/IP limiter). Request lifecycle:
+
+1. requireAuth → schema validation (question ≤ 2000 chars, optional
+   24-hex conversationId) → workspace context → RBAC.
+2. Optional conversation HISTORY (workspace-owned else 404): PUBLIC
+   messages only in a bounded tail window (`AI_AGENT_HISTORY_*`). Internal
+   notes are excluded IN THE QUERY and never enter agent context.
+3. Prompt 13 retrieval for the question, scoped to the authorized
+   workspace inside the store query (retrieval failures surface as coded
+   503s — RAG_* codes passthrough, never stack traces).
+4. Evidence gate (pure module `agent-grounding.ts`): answerability uses
+   only MEASURED signals — passage count (`AI_AGENT_MIN_PASSAGES`),
+   similarity floor (`AI_AGENT_MIN_CONTEXT_SCORE`) — model self-confidence
+   is inadmissible. Insufficient evidence → 200 ABSTAINED with reason
+   (`NO_KNOWLEDGE`, `LOW_RELEVANCE`, `INSUFFICIENT_EVIDENCE`) and NO
+   provider call.
+5. Bounded context assembly → provider generation under a strict
+   untrusted-data system prompt (passages/history are DATA; instructions
+   embedded in them are ignored; no invented facts).
+6. Output contract: the model MUST return strict JSON
+   `{answerable, answer, citations}`. Citation validation drops phantom
+   references (spoofed/garbage numbers); a substantive answer with no
+   valid surviving citation abstains (`UNCITED_ANSWER`); answers are
+   truncated to `AI_AGENT_ANSWER_MAX_CHARS` with an ellipsis marker.
+7. Citation metadata (source type, article title / document filename,
+   chunk id) is resolved through the SAME workspace-scoped repositories —
+   never from model text. No storage paths, signed URLs or infrastructure
+   details in citations.
+
+Structured payload: `status`, `answer | abstentionReason`, validated
+`citations[]`, `topScore`, `passagesRetrieved`, `model`, honest
+`tokenUsage` (nulls when the provider returns none). The answer is NOT
+persisted — the contract is the Prompt 15 integration point, not a message
+write.
+
+Config (see `.env.example`): `AI_PROVIDER` (`openai` adapter implemented;
+`gemini`/`bedrock` reserved), `AI_CHAT_BASE_URL`, `AI_CHAT_MODEL`,
+`AI_TIMEOUT_MS`, `AI_MAX_OUTPUT_TOKENS`, and the `AI_AGENT_*` policy/bounds.
+With `AI_PROVIDER=none` the endpoint answers safe 503
+`AGENT_AI_NOT_CONFIGURED`; missing embeddings/keys surface `RAG_*` codes.
+`npm run verify:agent` runs a 48-check end-to-end driver (RBAC, concealment,
+validation, grounded answers with citation validation, abstention reasons,
+provider/retrieval failures, conversation isolation, content-free audit
+rows) against the mock provider via the chat factory's test seam.
+
+Audit: `agent.question_answered` rows append outcome/abstention codes,
+retrieval counts and ip/user-agent — never question/answer/prompt content.
+
 ## Authentication (implemented)
 
 Short-lived **access JWTs** + long-lived **opaque rotating refresh tokens**:

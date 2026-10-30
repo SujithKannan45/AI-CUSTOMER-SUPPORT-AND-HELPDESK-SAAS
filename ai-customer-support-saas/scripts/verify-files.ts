@@ -150,7 +150,11 @@ async function main(): Promise<void> {
     Promise.all([
       new Promise<void>((resolve) => httpServer.close(() => resolve())),
       memoryServer.stop(),
-    ]).then(() => undefined);
+    ]).then(async () => {
+      // After memoryServer.stop() the Mongo driver topology keeps an auto
+      // reconnect loop alive, holding the Node event loop open forever.
+      (await import('mongoose')).default.disconnect();
+    });
 
   const api = (pathSegments: string): string => `http://127.0.0.1:${port}/api/v1${pathSegments}`;
   const { UserModel } = await import('../server/src/modules/users/user.model.js');

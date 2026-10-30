@@ -62,6 +62,8 @@ export const WORKSPACE_PERMISSIONS = {
   viewRag: 'rag.view',
   /** Trigger indexing/reindexing and purge indexed chunks (Prompt 13). */
   indexRag: 'rag.index',
+  /** Ask the grounded AI support agent one question (Prompt 14 staff preview). */
+  askAgent: 'agent.ask',
   /** Viewing workspace analytics dashboards. */
   viewAnalytics: 'analytics.view',
   /** Workspace-level security settings (security keys, workspace-wide policies). */
@@ -101,7 +103,9 @@ type P = readonly WorkspacePermission[];
  *   knowledge-base content). Nothing mutating; analytics excluded because
  *   aggregates leak business trends beyond what "view a ticket" means, and
  *   membership listing stays allowed as directory-visibility, not
- *   administration.
+ *   administration. The AI support agent (`agent.ask`) is excluded too: each
+ *   ask may trigger a paid provider call, which is staff desk work, not
+ *   read-only business record access.
  */
 const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
   owner: [
@@ -124,6 +128,7 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.manageDocuments,
     WORKSPACE_PERMISSIONS.viewRag,
     WORKSPACE_PERMISSIONS.indexRag,
+    WORKSPACE_PERMISSIONS.askAgent,
     WORKSPACE_PERMISSIONS.viewAnalytics,
     WORKSPACE_PERMISSIONS.manageWorkspaceSecurity,
   ],
@@ -147,6 +152,7 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.manageDocuments,
     WORKSPACE_PERMISSIONS.viewRag,
     WORKSPACE_PERMISSIONS.indexRag,
+    WORKSPACE_PERMISSIONS.askAgent,
     WORKSPACE_PERMISSIONS.viewAnalytics,
   ],
   agent: [
@@ -161,6 +167,7 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.viewKnowledgeBase,
     WORKSPACE_PERMISSIONS.viewDocuments,
     WORKSPACE_PERMISSIONS.manageDocuments,
+    WORKSPACE_PERMISSIONS.askAgent,
   ],
   viewer: [
     WORKSPACE_PERMISSIONS.viewWorkspace,
