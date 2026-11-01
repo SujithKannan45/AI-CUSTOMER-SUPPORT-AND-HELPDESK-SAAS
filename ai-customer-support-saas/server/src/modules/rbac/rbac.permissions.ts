@@ -64,6 +64,10 @@ export const WORKSPACE_PERMISSIONS = {
   indexRag: 'rag.index',
   /** Ask the grounded AI support agent one question (Prompt 14 staff preview). */
   askAgent: 'agent.ask',
+  /** Read escalations (queue, details, history) — Prompt 15 handoff records. */
+  viewEscalations: 'escalation.view',
+  /** Create and manage escalations (assign/accept/resolve/cancel) — Prompt 15. */
+  manageEscalations: 'escalation.manage',
   /** Viewing workspace analytics dashboards. */
   viewAnalytics: 'analytics.view',
   /** Workspace-level security settings (security keys, workspace-wide policies). */
@@ -129,6 +133,8 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.viewRag,
     WORKSPACE_PERMISSIONS.indexRag,
     WORKSPACE_PERMISSIONS.askAgent,
+    WORKSPACE_PERMISSIONS.viewEscalations,
+    WORKSPACE_PERMISSIONS.manageEscalations,
     WORKSPACE_PERMISSIONS.viewAnalytics,
     WORKSPACE_PERMISSIONS.manageWorkspaceSecurity,
   ],
@@ -153,6 +159,8 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.viewRag,
     WORKSPACE_PERMISSIONS.indexRag,
     WORKSPACE_PERMISSIONS.askAgent,
+    WORKSPACE_PERMISSIONS.viewEscalations,
+    WORKSPACE_PERMISSIONS.manageEscalations,
     WORKSPACE_PERMISSIONS.viewAnalytics,
   ],
   agent: [
@@ -168,6 +176,8 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.viewDocuments,
     WORKSPACE_PERMISSIONS.manageDocuments,
     WORKSPACE_PERMISSIONS.askAgent,
+    WORKSPACE_PERMISSIONS.viewEscalations,
+    WORKSPACE_PERMISSIONS.manageEscalations,
   ],
   viewer: [
     WORKSPACE_PERMISSIONS.viewWorkspace,
@@ -176,6 +186,7 @@ const ROLE_PERMISSIONS: { readonly [K in WorkspaceRole]: P } = {
     WORKSPACE_PERMISSIONS.viewTickets,
     WORKSPACE_PERMISSIONS.viewConversations,
     WORKSPACE_PERMISSIONS.viewKnowledgeBase,
+    WORKSPACE_PERMISSIONS.viewEscalations,
   ],
 };
 

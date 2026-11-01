@@ -9,6 +9,7 @@ import {
 } from '../modules/conversations/conversation.routes.js';
 import { customerRouter } from '../modules/customers/customer.routes.js';
 import { documentRouter } from '../modules/documents/document.routes.js';
+import { escalationRouter } from '../modules/escalations/escalation.routes.js';
 import { publicKnowledgeBaseRouter } from '../modules/knowledge-base/kb-public.routes.js';
 import { knowledgeBaseRouter } from '../modules/knowledge-base/kb.routes.js';
 import { ragRouter } from '../modules/rag/rag.routes.js';
@@ -55,6 +56,12 @@ apiRouter.use('/workspaces/:workspaceId/rag', ragRouter);
 // Prompt 13 internal service; there is deliberately NO customer-facing agent
 // route until customer-portal authentication exists (documented limitation).
 apiRouter.use('/workspaces/:workspaceId/agent', agentRouter);
+// Escalation routes (Prompt 15) nest under the SAME tenant context:
+// `/escalations` queue/listing and `/escalations/:escalationId` lifecycle
+// mutations. Manual staff escalation and AI-triggered handoffs share the one
+// service; customer-facing creation stays deferred behind real customer
+// authentication (documented limitation, Prompt 14 pattern).
+apiRouter.use('/workspaces/:workspaceId/escalations', escalationRouter);
 apiRouter.use('/public/knowledge-base', publicKnowledgeBaseRouter);
 // Customer routes nest under the workspace tenant context:
 // `/api/v1/workspaces/:workspaceId/customers` carries the parent's

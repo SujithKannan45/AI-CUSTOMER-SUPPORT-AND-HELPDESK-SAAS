@@ -8,17 +8,21 @@ import { AuditLogModel } from '../audit-logs/audit-log.model.js';
  * collection with the same fire-and-forget convention as rag-audit:
  * a failed append never breaks the user-visible flow and is logged loudly.
  *
- * Action: agent.question_answered
+ * Actions: agent.question_answered, agent.question_failed
  *
  * NEVER recorded: the question, the answer, passage text, prompts — only
  * id, outcome codes, counts and truncated status metadata (the compliance
  * trail stays content-free). Token usage is recorded ONLY when the provider
- * actually returned it.
+ * actually returned it. Failed asks are audited too: Prompt 15's
+ * repeated-failure rule counts the audit trail of unsuccessful interactions
+ * per conversation, so a provider/retrieval failure that was never audited
+ * would be invisible to that counter.
  */
 export const AGENT_AUDIT_RESOURCE_TYPE = 'agent_response' as const;
 
 export const AGENT_AUDIT_ACTIONS = {
   questionAnswered: 'agent.question_answered',
+  questionFailed: 'agent.question_failed',
 } as const;
 
 export type AgentAuditAction = (typeof AGENT_AUDIT_ACTIONS)[keyof typeof AGENT_AUDIT_ACTIONS];

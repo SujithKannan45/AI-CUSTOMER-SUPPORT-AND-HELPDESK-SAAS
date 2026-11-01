@@ -459,6 +459,117 @@ rows) against the mock provider via the chat factory's test seam.
 Audit: `agent.question_answered` rows append outcome/abstention codes,
 retrieval counts and ip/user-agent — never question/answer/prompt content.
 
+## AI human handoff & escalation (Prompt 15, implemented)
+
+An **escalation** is a workspace-scoped handoff record in
+`modules/escalations/` (model → repository → service → controller → routes,
+same layering as every other module). Mounted at
+`/api/v1/workspaces/:workspaceId/escalations` under the SAME tenant context
+middleware; RBAC: `escalation.view` (owner/admin/agent/viewer — the queue is
+readable) and `escalation.manage` (owner/admin/agent — mutate), with
+service-level ownership caps on top: assignment requires the
+`ticket.assign` grant (same rule as tickets), only the current assignee may
+ACCEPT an ASSIGNED record (privileged staff reassign instead), resolution is
+the acceptee's or an administrator's, cancellation is the initiator's or an
+administrator's.
+
+**Lifecycle** (typed transition map in `escalation.types.ts`; invalid moves
+are 409 `INVALID_ESCALATION_TRANSITION` with the allowed targets):
+`PENDING → ASSIGNED (assign) | ACCEPTED (self-claim) | CANCELLED` ·
+`ASSIGNED → ASSIGNED (triage reassignment, different assignee — same
+assignee is an idempotent no-op) | ACCEPTED | CANCELLED` ·
+`ACCEPTED → RESOLVED | ASSIGNED (reassignment resets acceptance) |
+CANCELLED` · terminal `RESOLVED`/`CANCELLED`. Concurrency: optimistic
+document-version guard in the repository — a stale writer gets 409
+`ESCALATION_CONCURRENT_CHANGE`; repeated identical terminal actions are
+idempotent (200).
+
+**Active-escalation invariant:** exactly ONE active record
+(`PENDING`/`ASSIGNED`/`ACCEPTED`) per conversation, enforced by a partial
+unique index (`{ workspaceId, conversationId }` for active statuses) + a
+race-safe create that re-reads after the duplicate-key error and REUSES the
+existing record (200 with `created: false`) — duplicate triggers and racing
+creations can never yield two active handoffs. After a terminal state a NEW
+escalation may be created later.
+
+**Automatic triggers** (pure rules in `escalation.rules.ts`; the agent never
+creates records itself — `agent.service.ts` reports the MEASURED outcome of
+every conversation-scoped ask through `noteAgentInteraction`, fire-safe so a
+evaluation failure cannot corrupt the ask):
+
+- **Explicit human request** (§3B) — keyword stems
+  (`ESCALATION_HUMAN_REQUEST_KEYWORDS`) matched with word-boundary prefixes,
+  case-insensitive. Generic, config-defined vocabulary — no company policy
+  hardcoded. ✓1.6 ✓1.7 ✓1.8
+- **Sensitive topics** (§3C) — `ESCALATION_SENSITIVE_TOPICS` format
+  `key|kw1,kw2;key2|…` (billing/refund/account_access/security/legal/complaint
+  defaults; all placeholder sets); trigger records the matched `topicKey`.
+  Human-request detection dominates topic detection ✓1.6.
+- **Insufficient knowledge** (§3A) — the ask ABSTAINED
+  (`AI_INSUFFICIENT_KNOWLEDGE`, reasonCode = the Prompt 14 abstention code).
+  Toggle: `ESCALATION_ON_ABSTENTION`. ✓6.6 ✓6.7
+- **Repeated AI failure** (§3D) — after N consecutive unsuccessful asks in
+  ONE conversation inside the lookback window (`ESCALATION_REPEATED_FAILURE
+_THRESHOLD` 2–50, `ESCALATION_FAILURE_WINDOW_HOURS`), read from the audit
+  trail (`agent.question_failed` + non-ANSWERED outcomes), conversation- and
+  workspace-scoped → `AI_REPEATED_FAILURE` with
+  `CONSECUTIVE_UNSUCCESSFUL_AI`. The repeated reason overrides single-shot
+  reasons. ✓6.9b–✓6.14
+- **Technical failure** (§3E) — provider/retrieval failures map to
+  `TECHNICAL_FAILURE` with the actual failure code; toggled per environment
+  (`ESCALATION_ON_TECHNICAL_FAILURE`). Misconfiguration classes
+  (`*_NOT_CONFIGURED`, invalid config codes) are NEVER handoff triggers — a
+  broken deployment cannot spawn work ✓1.1 ✓1.4. With the rule off, one
+  failure is a documented safe fallback: the caller gets its 503 and no
+  escalation exists ✓6.9.
+- **Manual staff escalation** (§3F) — POST with the conversation id (client
+  never supplies ticket/priority/initiator; ticket linkage + priority are
+  server-derived) ✓3.1–✓3.3.
+
+**Agent pause gate** (§5 step 6): while an ACTIVE escalation exists for a
+conversation, `agent/ask` short-circuits BEFORE retrieval/provider with 409
+`AGENT_HANDOFF_ACTIVE` (escalationId + status in details only) — the AI
+cannot answer after human ownership ✓6.15 ✓6.16; a resolved/cancelled handoff
+un-pauses ✓6.17 ✓6.18.
+
+**Ticket integration:** creation transitions the associated ticket through
+the EXISTING ticket lifecycle (`OPEN → IN_PROGRESS` by default) and records
+`escalation.ticket_transitioned` (or `..._skipped` with a reason code when
+no legal move exists); resolution drives the ticket toward RESOLVED where
+the lifecycle allows ✓3.4 ✓3.15. No duplicate ticket model — the escalation
+REFERENCES it.
+
+**Assignment routing** (§6): assignees must be ACTIVE desk members of the
+SAME workspace (same eligibility rule as ticket assignment — owner/admin/
+agent; viewer ineligible; cross-workspace ids are rejected as ineligible
+422 with no membership oracle ✓3.7). No invented availability/workload
+metaphysics: no auto-balancing — the queue is PENDING; staff assign,
+self-claim or reassign.
+
+**Real-time events** (§9): publish-never-notify — `escalation.events.ts` is
+a typed seam publishing content-free, id-only payloads (`workspaceId`,
+`escalationId`, `conversationId`, `ticketId`, status/priority/assignee
+codes) between repository write and audit append; delivery failure never
+fails the REST operation ✓4.2 and audit + document carry the durable state.
+A Socket.IO transport can be attached at the seam later; no guarantees
+beyond at-most-once fan-out are claimed.
+
+**Audit** (§10): `escalation.created/assigned/reassigned/accepted/resolved/
+cancelled/ticket_transitioned/ticket_transition_skipped` — actor, ids,
+trigger/reason/topic codes; notes/reasons and any conversation content are
+never stored in audit metadata ✓8.1–✓8.3.
+
+`npm run verify:escalations` runs the 75-check end-to-end driver (trigger
+rules, RBAC/concealment/validation, manual lifecycle, reassignment,
+cancellation, agent-triggered handoffs, pause gate, duplicate/create races,
+assignment race + version-guard conflict, content-free audit/events) against
+in-memory Mongo + the mock provider seam — no live OpenAI, S3 or Atlas.
+Limitations (documented, not hidden): single-assignee model (no teams — none
+exist in the data); no durable event queue (BullMQ remains a Prompt 12
+outstanding dependency); Socket.IO transport shipped as a seam, not yet
+attached to the live socket server events; AUTO ESCALATION priority is the
+configured default, no per-trigger tuning beyond topic keys.
+
 ## Authentication (implemented)
 
 Short-lived **access JWTs** + long-lived **opaque rotating refresh tokens**:

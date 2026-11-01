@@ -10,6 +10,10 @@ import { findConversationInWorkspace } from '../conversations/conversation.repos
 import { listMessages } from '../conversations/message.repository.js';
 import { findDocumentInWorkspace } from '../documents/document.repository.js';
 import type { DocumentFile } from '../documents/document.types.js';
+import {
+  getActiveHandoff,
+  noteAgentInteraction,
+} from '../escalations/escalation.service.js';
 import { findArticleInWorkspace } from '../knowledge-base/kb-article.repository.js';
 import type { KbArticleDocument } from '../knowledge-base/kb.types.js';
 import { EmbeddingProviderError } from '../rag/embeddings/embedding-provider.interface.js';
@@ -191,7 +195,111 @@ export interface AskAgentInput {
  * handoff/customer path is this function's structured result, not a
  * message write.
  */
+/**
+ * Escalation pause gate (Prompt 15 §5): when an ACTIVE handoff owns this
+ * conversation, the AI agent is PAUSED — no retrieval, no provider call, no
+ * automated answer. A 409 with the handoff reference tells the caller WHY,
+ * without leaking unrelated escalation metadata (assignment details stay
+ * behind the Prompt 15 escalation endpoints).
+ */
+async function requireNoActiveHandoff(
+  workspaceId: Types.ObjectId,
+  conversationId: Types.ObjectId,
+): Promise<void> {
+  const handoff = await getActiveHandoff(workspaceId, conversationId);
+  if (handoff !== null) {
+    throw new AppError('The AI agent is paused for this conversation — a human handoff is active', {
+      statusCode: 409,
+      code: 'AGENT_HANDOFF_ACTIVE',
+      details: { escalationId: handoff.escalationId, escalationStatus: handoff.status },
+    });
+  }
+}
+
+/**
+ * Fire-safe escalation hook (Prompt 15 §7): every conversation-scoped ask
+ * reports its MEASURED outcome to the escalation service, which decides and
+ * materializes handoffs on its own (this service never creates escalations
+ * directly). The hook is the escalation module's boundary — its evaluation
+ * is fire-safe there, so a trigger failure can never corrupt the answer or
+ * an error path. Provider/retrieval failures arrive through the outer
+ * wrapper's FAILED outcome instead.
+ */
+function reportSuccessfulInteraction(
+  input: AskAgentInput,
+  answer: AgentAnswer,
+  request?: Request,
+): void {
+  if (input.conversationId === undefined) return;
+  void noteAgentInteraction({
+    workspaceId: input.workspaceId,
+    conversationId: input.conversationId,
+    actorId: input.requesterId,
+    question: input.question,
+    outcome: answer.status === 'ANSWERED'
+      ? { kind: 'ANSWERED' }
+      : { kind: 'ABSTAINED', abstentionReason: answer.abstentionReason },
+    ...(request !== undefined ? { request } : {}),
+  });
+}
+
+/**
+ * One agent request (staff answer preview). NOTE: the answer is NOT
+ * persisted into the conversation — posting messages has lifecycle
+ * side effects (last-message metadata, socket broadcast, audit) owned by
+ * the conversation feature. The integration point for Prompt 15's
+ * handoff/customer path is this function's structured result, not a
+ * message write.
+ */
 export async function askSupportAgent(input: AskAgentInput): Promise<AgentAnswer> {
+  try {
+    return await runSupportAgent(input);
+  } catch (error: unknown) {
+    // Failures of conversation-scoped asks feed the escalation rules as
+    // FAILED outcomes and append a content-free `agent.question_failed`
+    // audit row (Prompt 15's repeated-failure counter reads this trail;
+    // without the row a failed ask is invisible to the threshold logic).
+    // Ordering law (same as the success paths): the escalation hook runs
+    // BEFORE this interaction's audit row exists, so the counter sees only
+    // PRECEDING attempts. PAUSED errors are excepted — an ask inside an
+    // active handoff must not churn that handoff's own trigger evaluation.
+    if (input.conversationId !== undefined) {
+      const paused = error instanceof AppError && error.code === 'AGENT_HANDOFF_ACTIVE';
+      if (!paused) {
+        await noteAgentInteraction({
+          workspaceId: input.workspaceId,
+          conversationId: input.conversationId,
+          actorId: input.requesterId,
+          question: input.question,
+          outcome: {
+            kind: 'FAILED',
+            failureCode: error instanceof AppError ? error.code : 'AGENT_INTERNAL_ERROR',
+          },
+          ...(input.request !== undefined ? { request: input.request } : {}),
+        });
+        auditFailedAsk(input, error);
+      }
+    }
+    throw error;
+  }
+}
+
+/** Fire-and-forget failed-ask audit — outcome code only, no error details text. */
+function auditFailedAsk(input: AskAgentInput, error: unknown): void {
+  recordAgentAudit({
+    action: AGENT_AUDIT_ACTIONS.questionFailed,
+    workspaceId: input.workspaceId,
+    actorId: input.requesterId,
+    resourceId: input.conversationId?.toHexString() ?? 'ask',
+    metadata: {
+      outcome: 'FAILED',
+      failureCode: error instanceof AppError ? error.code : 'AGENT_INTERNAL_ERROR',
+    },
+    ...(input.request !== undefined ? { request: input.request } : {}),
+  });
+}
+
+async function runSupportAgent(input: AskAgentInput): Promise<AgentAnswer> {
   const startedAt = Date.now();
 
   const conversation = input.conversationId === undefined
@@ -200,6 +308,9 @@ export async function askSupportAgent(input: AskAgentInput): Promise<AgentAnswer
   if (input.conversationId !== undefined && conversation === null) {
     // Foreign or unknown ids read as not-found — no existence oracle.
     throw AppError.notFound('Conversation not found');
+  }
+  if (conversation !== null) {
+    await requireNoActiveHandoff(input.workspaceId, conversation._id);
   }
 
   const history = conversation === null ? [] : await readConversationHistory(input.workspaceId, conversation._id);
@@ -229,6 +340,9 @@ export async function askSupportAgent(input: AskAgentInput): Promise<AgentAnswer
       model: null,
       tokenUsage: null,
     };
+    // Hook runs BEFORE this interaction's audit row is written: the
+    // repeated-failure counter counts the trail of PRECEDING attempts.
+    reportSuccessfulInteraction(input, abstained, input.request);
     logOutcome(input, abstained, startedAt);
     auditOutcome(input, abstained);
     return abstained;
@@ -289,6 +403,9 @@ export async function askSupportAgent(input: AskAgentInput): Promise<AgentAnswer
       model: provider.model,
       tokenUsage: providerUsage,
     };
+    // Hook runs BEFORE this interaction's audit row is written: the
+    // repeated-failure counter counts the trail of PRECEDING attempts.
+    reportSuccessfulInteraction(input, abstained, input.request);
     logOutcome(input, abstained, startedAt);
     auditOutcome(input, abstained);
     return abstained;
@@ -309,6 +426,8 @@ export async function askSupportAgent(input: AskAgentInput): Promise<AgentAnswer
     model: provider.model,
     tokenUsage: providerUsage,
   };
+  // Hook runs BEFORE this interaction's audit row is written (same trail law).
+  reportSuccessfulInteraction(input, answered, input.request);
   logOutcome(input, answered, startedAt);
   auditOutcome(input, answered);
   return answered;

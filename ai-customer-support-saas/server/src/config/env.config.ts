@@ -175,6 +175,28 @@ const envSchema = z.object({
   RAG_CHUNK_OVERLAP_CHARS: z.coerce.number().int().min(0).default(150),
   /** Hard input cap before chunking (protects memory; sources stay bounded upstream). */
   RAG_MAX_SOURCE_CHARS: z.coerce.number().int().positive().default(300_000),
+
+  /** ── AI human handoff & escalation (Prompt 15) ─────────────────────────── */
+  /** Escalate when a grounded AI ask ABSTAINS for insufficient/irrelevant knowledge. */
+  ESCALATION_ON_ABSTENTION: z.enum(['true', 'false']).default('true'),
+  /** Escalate when the requester explicitly asks for a human (keyword rule below). */
+  ESCALATION_ON_HUMAN_REQUEST: z.enum(['true', 'false']).default('true'),
+  /** Escalate questions matching a configured sensitive-topic keyword rule. */
+  ESCALATION_ON_SENSITIVE_TOPIC: z.enum(['true', 'false']).default('true'),
+  /** Escalate provider/retrieval failures that prevented useful assistance (mis-config classes are never escalated). */
+  ESCALATION_ON_TECHNICAL_FAILURE: z.enum(['true', 'false']).default('true'),
+  /** Consecutive unsuccessful AI interactions within one conversation that trip the repeated-failure escalation (2–50). */
+  ESCALATION_REPEATED_FAILURE_THRESHOLD: z.coerce.number().int().min(2).max(50).default(3),
+  /** Audit-lookback window (hours) for counting consecutive unsuccessful AI interactions. */
+  ESCALATION_FAILURE_WINDOW_HOURS: z.coerce.number().int().positive().default(24),
+  /** Priority recorded for automatic escalations (manual escalations choose their own). */
+  ESCALATION_DEFAULT_PRIORITY: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).default('MEDIUM'),
+  /** Human-request keyword vocabulary (comma-separated stems; word-boundary prefix, case-insensitive). Generic placeholders — configurable, not company policy. */
+  ESCALATION_HUMAN_REQUEST_KEYWORDS: z.string().default('human,agent,representative,supervisor,manager,person'),
+  /** Sensitive-topic vocabularies as `key|kw1,kw2;key2|…` — generic placeholder sets, fully configurable. */
+  ESCALATION_SENSITIVE_TOPICS: z.string().min(1).default(
+    'billing|billing,invoice,charge,payment;refund|refund,refunded,money,bank;account_access|password,log in,login,account locked,account access;security|security,breach,hacked,phishing;legal|legal,lawsuit,attorney,court,regulator,regulation;complaint|complaint,complain,angry,unacceptable,terrible',
+  ),
 })
   .refine(
     (value) => value['RAG_CHUNK_OVERLAP_CHARS'] < value['RAG_CHUNK_MAX_CHARS'],

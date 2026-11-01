@@ -35,6 +35,7 @@
     "verify:files": "tsx scripts/verify-files.ts",
     "verify:rag": "tsx scripts/verify-rag.ts",
     "verify:agent": "tsx scripts/verify-agent.ts",
+    "verify:escalations": "tsx scripts/verify-escalations.ts",
     "seed:dev": "tsx scripts/seed-dev-data.ts"
   },
   "devDependencies": {

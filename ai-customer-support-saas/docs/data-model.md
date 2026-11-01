@@ -22,6 +22,7 @@ management in `server/src/database/database.ts`.
 | `file_assets`      | `modules/documents`                           | Yes           | **Yes** (`deletedAt` tombstone after byte purge) | Uploaded-file METADATA only — bytes live behind the `StorageService` seam; processing `status` + `extractionStatus` + bounded `extractedText`; optional `articleId` attach-point |
 | `audit_logs`       | `modules/audit-logs`                          | Yes (platform scope reserved) | Never | Append-only; updates/deletes rejected at model layer |
 | `rag_chunks`       | `modules/rag`                                 | Yes           | No (purged on source lifecycle) | One document per indexed chunk (Prompt 13); sources = PUBLISHED kb_articles + COMPLETED-extraction file_assets only; tenant scope applies INSIDE retrieval queries |
+| `escalations`      | `modules/escalations`                         | Yes           | No (`status` lifecycle is the lifecycle) | Workspace-scoped AI→human handoff records (Prompt 15); exactly ONE active record per conversation (partial unique index); bounded in-document lifecycle history |
 | `refresh_tokens`   | `modules/auth`                                | No (per user) | Revocation  | One row per active session; SHA-256 **hash only**, rotation chain via `familyId` |
 | `auth_tokens`      | `modules/auth`                                | No (per email) | Consumed/expiry | One-time verify-email / password-reset tokens, hashed at rest |
 
@@ -181,6 +182,11 @@ All tenant-owned indexes lead with `workspaceId` (shared-pool tenancy).
 | audit_logs         | `{ workspaceId: 1, createdAt: -1 }`                | Workspace activity feed, retention scans |
 | audit_logs         | `{ workspaceId: 1, resourceType: 1, resourceId: 1 }` | Per-resource history drill-down |
 | audit_logs         | `{ workspaceId: 1, actorId: 1, createdAt: -1 }`    | "What did this actor do" |
+| escalations        | `{ workspaceId, conversationId: 1 }` unique, partial (status ∈ PENDING/ASSIGNED/ACCEPTED) | The one-active-handoff-per-conversation LAW — DB-enforced; the race-safe create re-uses the winner on duplicate-key |
+| escalations        | `{ workspaceId, status, priorityRank: -1, createdAt: -1 }` | Escalation queue board: status filter, urgency-weighted order |
+| escalations        | `{ workspaceId, eligibleAssigneeId, updatedAt: -1 }` | Assigned work lists ("handoffs assigned to agent X") |
+| escalations        | `{ workspaceId, ticketId, createdAt: -1 }` | Ticket drill-down: the handoff story of one ticket |
+| escalations        | `{ workspaceId, createdAt: -1 }` | Queue listing fallback and date filters |
 | refresh_tokens     | `{ tokenHash: 1 }` unique (field `select: false`)  | Refresh-endpoint lookup by hash — raw tokens are never stored |
 | refresh_tokens     | `{ familyId: 1 }`                                  | Rotation chains + family-wide revocation (reuse = theft) |
 | refresh_tokens     | `{ userId: 1, expiresAt: -1 }`                     | Active-session lists, logout-all, TTL-friendly shape |
@@ -349,6 +355,50 @@ server-side).
   the factory test seam; retrieval work is mocked-only, live OpenAI and
   Atlas Vector Search remain UNVERIFIED until credentials exist.
 
+## Escalation collection (added in the handoff phase)
+
+- **`escalations`** (`modules/escalations`) — one document per AI→human
+  handoff: `workspaceId`, `ticketId`, `conversationId` (both server-validated
+  to live in the SAME workspace before a record may be created — a manual
+  escalation addresses only the conversation; ticket linkage is derived),
+  `triggerType` (`MANUAL | HUMAN_REQUEST | SENSITIVE_TOPIC |
+  AI_INSUFFICIENT_KNOWLEDGE | AI_REPEATED_FAILURE | TECHNICAL_FAILURE`),
+  `reasonCode` (machine code — e.g. the abstention reason, the failure code,
+  `SENSITIVE_TOPIC` route key, `CONSECUTIVE_UNSUCCESSFUL_AI`),
+  `topicKey` (matched sensitive-topic key or null), `status`
+  (`PENDING | ASSIGNED | ACCEPTED | RESOLVED | CANCELLED`), `priority`
+  (reuses the ticket priority vocabulary + `priorityRank`),
+  `initiatedBy` (`{ actorType: STAFF | AI_AGENT, actorId }` — never a
+  client-supplied field), `eligibleAssigneeId` + `acceptedById` (stamped by
+  the assign/accept services), `resolvedAt`/`cancelledAt` terminal stamps,
+  `history` (bounded in-document lifecycle entries: action/trigger key/
+  actorId/assignee or reason — no message content, no note text),
+  `createdAt`/`updatedAt`. NO internal-note or conversation text is stored
+  — notes live only in the (validated, ≤500 chars) request object and are
+  reproduced nowhere.
+- **The one-active law**: partial unique index
+  `{ workspaceId, conversationId }` for `PENDING/ASSIGNED/ACCEPTED` — DB-
+  enforced single active handoff per conversation; the repository's
+  race-safe create re-reads on duplicate-key and REUSES the winner (callers
+  see `created: false`), so duplicate triggers and racing requests cannot
+  spawn parallel handoffs. After a terminal state a new record may be
+  created later (escalations are repeatable per conversation, never
+  concurrent).
+- **Concurrency**: optimistic `__v` document-version guards in the
+  repository's transitions — a stale writer receives 409
+  `ESCALATION_CONCURRENT_CHANGE`. Terminal-state repeats are idempotent
+  (identical resolve/cancel return the current record, 200). No MongoDB
+  transactions are claimed — correctness is built from the unique index,
+  version guards and re-reads.
+- **Indexes**: `uniq_active_escalation_per_conversation` (above),
+  `{ workspaceId, status, priorityRank: -1, createdAt: -1 }` (queue board),
+  `{ workspaceId, eligibleAssigneeId, updatedAt: -1 }` (assignee queue),
+  `{ workspaceId, ticketId, createdAt: -1 }` (ticket drill-down),
+  `{ workspaceId, createdAt: -1 }` (listing). Audit reuses the append-only
+  `audit_logs` collection (`escalation.*` actions — ids and machine codes
+  only).
+- **Verification** — `npm run verify:escalations` (75/75).
+
 ## Soft-delete decisions
 
 | Model      | Decision | Rationale |
@@ -361,8 +411,8 @@ server-side).
 | AuditLog   | Never    | Immutable by design; updates and deletes throw at the model layer |
 | KbCategory | `archivedAt` + live-only query scope + `WITH_ARCHIVE` opt-in | Archiving is the reversible path; guarded against orphaning live children/articles (409 with counts) |
 | KbArticle  | No soft-deleted stamp — ARCHIVED is a first-class `status` | The status IS the lifecycle for the public/AI retrieval predicate; no hidden hook (query composition stays explicit) |
-| KbRevision | Never    | Append-only history; mutation throws at the model layer |
-| FileAsset  | `deletedAt` + live-only query scope + `withPurged` opt-in | DELETE purges BYTES (the real data) and tombstones the row for audit; the metadata row is retained, not hard-deleted |
+| KbRevision | Never    | Append-only history; mutation throws at the model layer || escalation         | No       | `status` IS the lifecycle (PENDING→terminal); resolved/cancelled handoffs stay for ticket/conversation history and audit; a repeatable new escalation is a NEW record |
+| FileAsset   | `deletedAt` + live-only query scope + `withPurged` opt-in | DELETE purges BYTES (the real data) and tombstones the row for audit; the metadata row is retained, not hard-deleted |
 
 ## Schema evolution
 
