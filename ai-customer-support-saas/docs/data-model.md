@@ -23,6 +23,9 @@ management in `server/src/database/database.ts`.
 | `audit_logs`       | `modules/audit-logs`                          | Yes (platform scope reserved) | Never | Append-only; updates/deletes rejected at model layer |
 | `rag_chunks`       | `modules/rag`                                 | Yes           | No (purged on source lifecycle) | One document per indexed chunk (Prompt 13); sources = PUBLISHED kb_articles + COMPLETED-extraction file_assets only; tenant scope applies INSIDE retrieval queries |
 | `escalations`      | `modules/escalations`                         | Yes           | No (`status` lifecycle is the lifecycle) | Workspace-scoped AI→human handoff records (Prompt 15); exactly ONE active record per conversation (partial unique index); bounded in-document lifecycle history |
+| `notifications`    | `modules/notifications`                       | Yes           | No (`readAt` is read state) | Per-recipient in-app inbox rows (Prompt 16); unique `{ workspaceId, recipientId, eventKey }` is the duplicate-prevention law; title/body are content-safe |
+| `notification_preferences` | `modules/notifications`               | Yes           | No          | One row per (workspace, user) — unique index; channel switches (`inAppEnabled`, `emailEnabled`) + category switches; defaults resolved in code |
+| `email_deliveries` | `modules/notifications`                       | Yes           | No (`status` lifecycle) | Durable email ledger (Prompt 16); unique `{ workspaceId, eventKey, recipientId }` = one email per event per recipient; stores content-safe title/body, NEVER rendered HTML |
 | `refresh_tokens`   | `modules/auth`                                | No (per user) | Revocation  | One row per active session; SHA-256 **hash only**, rotation chain via `familyId` |
 | `auth_tokens`      | `modules/auth`                                | No (per email) | Consumed/expiry | One-time verify-email / password-reset tokens, hashed at rest |
 
@@ -398,6 +401,55 @@ server-side).
   `audit_logs` collection (`escalation.*` actions — ids and machine codes
   only).
 - **Verification** — `npm run verify:escalations` (75/75).
+
+## Notification collections (added in the notifications phase)
+
+- **`notifications`** (`modules/notifications`) — one inbox row per
+  (workspace, recipient, event): `recipientId`, `type`
+  (`ticket.* | conversation.public_message | escalation.* | ai.handoff |
+  ai.failure`), `title` (≤200) + `body` (≤500) composed ONLY from machine
+  facts (ticket number, status, priority, trigger codes), `entityType`
+  (`ticket | conversation | escalation`) + `entityId`, `eventKey`,
+  `readAt` (null = unread). No message body, internal note, AI prompt,
+  retrieved passage or resolution note is ever stored — the recipient
+  audience can later include customers, so previews are safe by
+  construction.
+- **Duplicate-prevention law**: unique
+  `{ workspaceId, recipientId, eventKey }`. `eventKey` is derived by the
+  publisher from PERSISTED facts (`<entityId>:<kind>:<updatedAtMs>` for
+  tickets, `<messageId>:created` for messages, and
+  `<escalationId>:<eventType>:<updatedAtMs>` for escalations), so a
+  retried/duplicated domain event collapses into the existing row instead of
+  creating a second inbox entry.
+- **Indexes**: `idx_notifications_inbox`
+  (`{ workspaceId, recipientId, createdAt: -1, _id: -1 }` — newest-first feed
+  with keyset ordering through `_id`), `idx_notifications_unread`
+  (`{ workspaceId, recipientId, readAt }` — unread count/filter),
+  `uniq_notification_event_per_recipient` (above). Retention/TTL is a
+  deploy-time decision (notifications are low-value derived rows); nothing
+  is soft-deleted.
+- **`notification_preferences`** — one row per `{ workspaceId, userId }`
+  (unique `uniq_preference_per_member`). Fields: `inAppEnabled`,
+  `emailEnabled`, `ticketAssignment`, `ticketUpdates`, `publicReplies`,
+  `escalations`, `aiHandoff` — all default `true`. Reads resolve DEFAULTS
+  without creating a row; the first PATCH upserts atomically with
+  `$setOnInsert`, so concurrent first writes converge on one document.
+  Category switches gate BOTH channels; channel switches are independent
+  (email still requires a render source, which the notification/ledger rows
+  provide).
+- **`email_deliveries`** — the durable delivery ledger: `recipientId`,
+  `notificationId` (null when in-app was muted), `to` (address snapshot),
+  `templateKey` (a notification type), content-safe `title`/`body` for
+  re-rendering, `status` (`PENDING | PROCESSING | SENT | FAILED |
+  RETRY_PENDING`), `attempts`/`maxAttempts`, `lastErrorCode` (stable
+  machine code), `provider`, `acceptedAt`, `nextAttemptAt`. `SENT` means the
+  PROVIDER ACCEPTED the message — there is no delivery webhook, so it is
+  never described as inbox delivery. Indexes:
+  `uniq_email_delivery_per_recipient_event`
+  (`{ workspaceId, eventKey, recipientId }` — no duplicate emails on event
+  retries), `idx_email_delivery_sweep`
+  (`{ workspaceId, status, nextAttemptAt }`), `idx_email_delivery_recipient`.
+- **Verification** — `npm run verify:notifications` (61/61 checks).
 
 ## Soft-delete decisions
 

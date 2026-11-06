@@ -290,6 +290,8 @@ async function materializeEscalation(args: {
       ticketId: args.payload.ticketId.toHexString(),
       triggerType: args.triggerType,
       priority: args.priority,
+      // Self-notification suppression only (not authorization).
+      actorId: args.initiator.actorId?.toHexString() ?? null,
     });
   }
 
@@ -589,6 +591,7 @@ export async function assignEscalationFlow(
     escalationId: updated._id.toHexString(),
     conversationId: updated.conversationId.toHexString(),
     assigneeId: assigneeId.toHexString(),
+    actorId: context.actorId,
   });
 
   return { escalation: toEscalationDto(updated) };
@@ -663,6 +666,7 @@ export async function acceptEscalationFlow(
     escalationId: updated._id.toHexString(),
     conversationId: updated.conversationId.toHexString(),
     acceptedById: actorId.toHexString(),
+    actorId: context.actorId,
   });
 
   return { escalation: toEscalationDto(updated) };
@@ -735,6 +739,7 @@ export async function resolveEscalationFlow(
     workspaceId: context.workspaceId,
     escalationId: updated._id.toHexString(),
     conversationId: updated.conversationId.toHexString(),
+    actorId: context.actorId,
   });
 
   return { escalation: toEscalationDto(updated) };
@@ -798,6 +803,7 @@ export async function cancelEscalationFlow(
     workspaceId: context.workspaceId,
     escalationId: updated._id.toHexString(),
     conversationId: updated.conversationId.toHexString(),
+    actorId: context.actorId,
   });
 
   return { escalation: toEscalationDto(updated) };

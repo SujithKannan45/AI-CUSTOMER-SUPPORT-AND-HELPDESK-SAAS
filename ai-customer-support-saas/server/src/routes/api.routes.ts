@@ -12,6 +12,7 @@ import { documentRouter } from '../modules/documents/document.routes.js';
 import { escalationRouter } from '../modules/escalations/escalation.routes.js';
 import { publicKnowledgeBaseRouter } from '../modules/knowledge-base/kb-public.routes.js';
 import { knowledgeBaseRouter } from '../modules/knowledge-base/kb.routes.js';
+import { notificationRouter } from '../modules/notifications/notification.routes.js';
 import { ragRouter } from '../modules/rag/rag.routes.js';
 import { ticketRouter } from '../modules/tickets/ticket.routes.js';
 import { workspaceRouter } from '../modules/workspaces/workspace.routes.js';
@@ -62,6 +63,11 @@ apiRouter.use('/workspaces/:workspaceId/agent', agentRouter);
 // service; customer-facing creation stays deferred behind real customer
 // authentication (documented limitation, Prompt 14 pattern).
 apiRouter.use('/workspaces/:workspaceId/escalations', escalationRouter);
+// Notifications (Prompt 16) under the SAME tenant context:
+// `/notifications` (inbox feed), `/notifications/unread-count`, `/:id/read`,
+// `/read-all` and `/preferences`. SELF-scoped: the recipient is always
+// `req.auth.userId`, never a path/body value — so no cross-user surface exists.
+apiRouter.use('/workspaces/:workspaceId/notifications', notificationRouter);
 apiRouter.use('/public/knowledge-base', publicKnowledgeBaseRouter);
 // Customer routes nest under the workspace tenant context:
 // `/api/v1/workspaces/:workspaceId/customers` carries the parent's

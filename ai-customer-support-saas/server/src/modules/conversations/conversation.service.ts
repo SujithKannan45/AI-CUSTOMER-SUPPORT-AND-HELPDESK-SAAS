@@ -27,6 +27,10 @@ import {
   type MessageListPayload,
 } from './conversation.dto.js';
 import {
+  conversationMessageEventKey,
+  publishConversationEvent,
+} from './conversation.events.js';
+import {
   createConversationRaceSafe,
   findConversationByTicket,
   findConversationInWorkspace,
@@ -347,6 +351,24 @@ export async function createMessageFlow(
       ticketId: conversation.ticketId.toHexString(),
       senderType: 'AGENT',
     },
+  });
+
+  // Persisted → audited → published. The event carries ids and visibility only:
+  // the message body never leaves this module through the seam (Prompt 16).
+  publishConversationEvent({
+    type: 'conversation.message_created',
+    workspaceId: context.workspaceId,
+    conversationId: conversation._id.toHexString(),
+    messageId: message._id.toHexString(),
+    ticketId: conversation.ticketId.toHexString(),
+    ticketNumber: ticket.number,
+    ticketSubject: ticket.subject,
+    ticketAssigneeId: ticket.agentId?.toHexString() ?? null,
+    ticketCreatedById: ticket.createdById.toHexString(),
+    senderId: context.actorId,
+    senderType: 'AGENT',
+    visibility: message.visibility,
+    eventKey: conversationMessageEventKey(message._id.toHexString()),
   });
 
   return { message: toMessageDto(message) };

@@ -37,6 +37,13 @@ export interface EscalationCreatedEvent {
   readonly ticketId: string;
   readonly triggerType: string;
   readonly priority: string;
+  /**
+   * Acting staff member (the requester whose ask tripped an AI trigger, or the
+   * staff member who escalated manually). Null for pure system side effects.
+   * Consumers use it ONLY to suppress self-notifications — never as
+   * authorization.
+   */
+  readonly actorId: string | null;
 }
 
 export interface EscalationAssignedEvent {
@@ -45,6 +52,8 @@ export interface EscalationAssignedEvent {
   readonly escalationId: string;
   readonly conversationId: string;
   readonly assigneeId: string;
+  /** Staff member who performed the assignment (self-notification suppression). */
+  readonly actorId: string | null;
 }
 
 export interface EscalationAcceptedEvent {
@@ -53,6 +62,8 @@ export interface EscalationAcceptedEvent {
   readonly escalationId: string;
   readonly conversationId: string;
   readonly acceptedById: string;
+  /** Staff member who accepted (self-notification suppression). */
+  readonly actorId: string | null;
 }
 
 export interface EscalationConcludedEvent {
@@ -60,6 +71,8 @@ export interface EscalationConcludedEvent {
   readonly workspaceId: string;
   readonly escalationId: string;
   readonly conversationId: string;
+  /** Staff member who resolved/cancelled (self-notification suppression). */
+  readonly actorId: string | null;
 }
 
 export type EscalationEvent =

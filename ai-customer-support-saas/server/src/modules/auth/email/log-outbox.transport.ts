@@ -1,5 +1,7 @@
 import { env, isProduction } from '../../../config/env.config.js';
 import { logger } from '../../../core/logger/logger.js';
+import { resolveEmailProvider } from '../../notifications/email/email.factory.js';
+import { renderPlainTextEmail } from '../../notifications/email/email.templates.js';
 
 import type { AuthEmail, EmailTransport } from './email.types.js';
 
@@ -66,17 +68,33 @@ class LogOutboxTransport implements EmailTransport {
 
 export const logOutboxTransport = new LogOutboxTransport();
 
-/** Picks the transport from configuration. Only "log" exists today. */
+/**
+ * Real transports (Prompt 16): smtp/ses are served by the notification
+ * module's provider adapter, so auth mail and notification mail share ONE
+ * configured provider instead of two divergent code paths. Auth bodies are
+ * plain text, so the adapter ships them as an escaped `<pre>` HTML part plus
+ * the original text alternative.
+ */
+const providerTransport: EmailTransport = {
+  send: async (email: AuthEmail): Promise<void> => {
+    await resolveEmailProvider().send({
+      to: email.to,
+      subject: email.subject,
+      text: email.text,
+      html: renderPlainTextEmail(email.text),
+      templateKey: 'auth',
+    });
+  },
+};
+
+/** Picks the transport from configuration. */
 export function resolveEmailTransport(): EmailTransport {
   switch (env.EMAIL_PROVIDER) {
     case 'log':
       return logOutboxTransport;
     case 'smtp':
     case 'ses':
-      // Real adapters arrive with the notifications phase; until then a
-      // misconfigured production boot is already blocked by env.config.ts,
-      // and here we fail loudly rather than silently dropping mail.
-      throw new Error(`EMAIL_PROVIDER="${env.EMAIL_PROVIDER}" has no adapter yet — use "log" in development`);
+      return providerTransport;
     default: {
       const exhaustive: never = env.EMAIL_PROVIDER;
       throw new Error(`Unknown EMAIL_PROVIDER: ${String(exhaustive)}`);

@@ -570,6 +570,127 @@ outstanding dependency); Socket.IO transport shipped as a seam, not yet
 attached to the live socket server events; AUTO ESCALATION priority is the
 configured default, no per-trigger tuning beyond topic keys.
 
+## Notifications & email (Prompt 16, implemented)
+
+A workspace-scoped **in-app inbox** plus **transactional email** in
+`modules/notifications/` (model → repository → preferences → mapping →
+dispatcher → delivery service → controller → routes, same layering as every
+other module). Mounted at `/api/v1/workspaces/:workspaceId/notifications`
+under the SAME tenant context middleware.
+
+**Request surface** (self-scoped — NO permission gate, because the resources
+are the caller's own inbox/preferences; membership is the boundary):
+
+| Method/Path | Purpose |
+| --- | --- |
+| `GET /notifications` | paginated inbox (`page`, `limit`, `unread`, `type`, `entityType`, `entityId`) |
+| `GET /notifications/unread-count` | badge count |
+| `POST /notifications/:notificationId/read` | mark one read (idempotent) |
+| `POST /notifications/read-all` | mark every unread item of the caller |
+| `GET /notifications/preferences` | effective preferences (defaults when never stored) |
+| `PATCH /notifications/preferences` | partial update (audited) |
+
+**Event integration.** Business modules publish typed, fire-safe events AFTER
+persistence, through module-local buses (`tickets/ticket.events.ts`,
+`conversations/conversation.events.ts`, and Prompt 15's
+`escalations/escalation.events.ts`). The dispatcher subscribes once per
+process (`registerNotificationDispatcher()`, called from `createApp`) and
+schedules tracked in-process work, so a notification failure can never fail
+the ticket/escalation/message operation it observes. Each event carries a
+STABLE `eventKey` derived from persisted facts, which is what makes a
+replayed event idempotent rather than a duplicate.
+
+**Mapping is centralized** in `notification.mapping.ts` — the single place
+that answers "who hears about what, and what does it say":
+
+- ticket assignment/reassignment → the new assignee; status/priority changes →
+  assignee + creator; unassigned ticket creation → members holding
+  `ticket.assign` (deterministic order, capped by
+  `NOTIFICATION_MAX_RECIPIENTS`);
+- PUBLIC staff reply → ticket assignee + creator; INTERNAL notes → nobody
+  (the event is published, the mapping ignores it);
+- escalation created (manual) → members holding `escalation.manage`;
+  AI-initiated handoffs → `ai.handoff`, technical failures → `ai.failure`;
+  assignment → the assignee; acceptance → the previous assignee; resolution/
+  cancellation → the involved staff;
+- the ACTING user is always excluded — nobody is notified about their own
+  action — and titles/bodies are composed only from machine facts (ticket
+  number, status, priority, trigger code). Conversation bodies, internal
+  notes, AI prompts, retrieved passages and resolution/cancel notes are never
+  read by the mapping, so they cannot leak into a preview or an email.
+
+**Preferences** (`notification_preferences`, one row per workspace+user):
+channel switches (`inAppEnabled`, `emailEnabled`) and category switches
+(`ticketAssignment`, `ticketUpdates`, `publicReplies`, `escalations`,
+`aiHandoff`), all defaulting ON. Every notification type maps to exactly one
+category (a `Record<NotificationType, …>` compile-time law). Category
+switches gate BOTH channels; channel switches are independent. Reads resolve
+defaults without writing; the first PATCH is an atomic upsert, so no duplicate
+rows and no read-then-write race. Updates are audited as
+`notification.preferences_updated` with FIELD NAMES only.
+
+**Email provider abstraction** (`email/`): `EmailProvider` interface with
+`log` (dev/test outbox — logs metadata only, refuses to run in production),
+`smtp` (nodemailer; timeouts from `EMAIL_TIMEOUT_MS`) and `ses` (the SES SMTP
+endpoint through the same transport — there is no SES API adapter).
+Recipient and sender addresses are validated before contacting the provider;
+provider failures are normalized to stable machine codes and classified
+permanent vs transient (auth/envelope/5xx vs timeout/connection/4xx). No
+credential is ever logged or returned. Auth emails (verify/reset) use the SAME
+configured provider — the dev outbox in development, SMTP/SES in production —
+so a real deployment no longer has a provider it cannot send through.
+
+**Templates** (`email/email.templates.ts`): one branded responsive layout with
+a per-type registry (subject prefix + label) — the seven required templates
+(new-ticket, assignment, status update, public reply, escalation,
+escalation assignment, escalation resolution) plus the AI variants, always
+with a plain-text alternative. Every dynamic value is HTML-escaped (ticket
+subjects and workspace names are user-controlled), subjects have CR/LF
+stripped (header injection), and NO links are emitted because the client app
+has no ticket/escalation routes yet — a link builder belongs here once those
+exist.
+
+**Delivery lifecycle & honest retry story.** The ledger row is written BEFORE
+any provider call, then attempted inline once. `SENT` means the provider
+ACCEPTED the message — there is no delivery webhook, so inbox delivery is
+never claimed. Transient failures leave `RETRY_PENDING` with exponential
+backoff (`NOTIFICATION_EMAIL_RETRY_BASE_MS`, capped at 1h) and advance only
+when one of these explicit entry points runs:
+
+- `sweepEmailDeliveries(workspaceId, limit)` — the documented cron/worker
+  hook (workspace-scoped on purpose: no unscoped collection scan exists).
+- `attemptEmailDelivery(workspaceId, deliveryId)` — one atomic claim
+  (`PENDING`/`RETRY_PENDING → PROCESSING`, `attempts += 1`), so two sweepers
+  cannot send the same row twice.
+
+There is NO queue and NO worker in this deployment (Redis/BullMQ was never
+installed — Prompt 12 dependency), so nothing here spawns timers or unowned
+loops; a `PROCESSING` row from a crashed attempt stays `PROCESSING` (no lease
+reaper yet). Exactly-once delivery is not claimed anywhere; one email per
+event per recipient IS enforced by the unique ledger index.
+
+**Real-time status.** `notification.publisher.ts` is the publication seam: it
+is invoked only AFTER the notification persisted, is fire-safe, and receives
+exactly the recipient id the future socket layer must authorize against. The
+Socket.IO server itself does not exist yet (`sockets/README.md` — prepared,
+not implemented), so no live real-time notification delivery is claimed; the
+frontend badge/list can already be built on the REST endpoints.
+
+**Security & isolation:** every notification read/mutation filters on
+`{ workspaceId (validated param), recipientId = req.auth.userId }`; a
+foreign or unknown id is 404 (no existence oracle), other users' inboxes are
+unreachable by construction, and no endpoint accepts a recipient/user id.
+Emails contain no internal note, message body, AI prompt, credential or
+storage path; the ledger stores content-safe title/body but never rendered
+HTML, and email bodies are never logged.
+
+`npm run verify:notifications` runs the 61-check end-to-end driver (channel
+policy, template escaping, ticket/conversation/escalation mapping, inbox
+isolation and read lifecycle, preferences + audit, provider failure/retry/
+exhaustion/invalid-recipient, duplicate-event idempotency, publisher failure)
+against in-memory Mongo and mock provider objects — no live SMTP, Redis or
+Atlas.
+
 ## Authentication (implemented)
 
 Short-lived **access JWTs** + long-lived **opaque rotating refresh tokens**:
@@ -623,7 +744,10 @@ Zod errors render as 422 with field errors through the central error pipeline.
 
 ## Real-time (prepared)
 
-Socket.IO attaches to the existing HTTP server (no second port). Handshake JWT
+Socket.IO attaches to the existing HTTP server (no second port). Notification
+fan-out is already behind a typed seam (`notification.publisher.ts`) and
+escalation fan-out behind `escalation.events.ts`; the socket layer registers a
+transport/publisher rather than changing feature services. Handshake JWT
 auth → `socket.data = { userId, workspaceId, role }`; rooms are
 `workspace:{id}` / `conversation:{id}`; a socket can only join rooms inside
 its workspace. Typed `ClientToServerEvents`/`ServerToClientEvents` shared with
@@ -634,6 +758,11 @@ the client. Details: `server/src/sockets/README.md`.
 BullMQ + Redis for: document ingestion (chunk → embed → index), notification
 fan-out, analytics rollups, stale-ticket sweeps. Queues outlive deploys and
 give retries/backoff for AI-provider calls. Details: `server/src/jobs/README.md`.
+
+Until then, notification email retries are NOT a background job: failed rows
+sit in `email_deliveries` as `RETRY_PENDING` and only advance when
+`sweepEmailDeliveries(workspaceId)` is invoked (a cron entry point can call it
+today).
 
 ## AI seam
 

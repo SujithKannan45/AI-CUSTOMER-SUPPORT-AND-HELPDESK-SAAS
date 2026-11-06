@@ -11,6 +11,7 @@ import {
   securityHeaders,
 } from './core/middlewares/index.js';
 import { healthRouter } from './modules/health/health.routes.js';
+import { registerNotificationDispatcher } from './modules/notifications/notification.dispatcher.js';
 import { apiRouter } from './routes/api.routes.js';
 
 /**
@@ -44,6 +45,12 @@ export function createApp(registerRoutes?: (app: Express) => void): Express {
   // Infrastructure probes stay outside the versioned API and the rate limiter.
   app.use(healthRouter);
   app.use(env.API_PREFIX, apiRouter);
+
+  // Notification dispatch subscribes to the module event buses ONCE per
+  // process (idempotent). It runs as tracked in-process work: no queue, no
+  // worker, no delivery guarantee — the durable record is the domain entity
+  // plus the audit trail (see notification.dispatcher.ts).
+  registerNotificationDispatcher();
 
   registerRoutes?.(app);
 

@@ -92,6 +92,18 @@ const envSchema = z.object({
   /** Browser URL of the SPA — used for CORS allow-list and future email links. */
   CLIENT_URL: z.string().url().default('http://localhost:5173'),
 
+  /** ── Notifications & email delivery (Prompt 16) ───────────────────────── */
+  /** Master switch for notification EMAIL delivery (in-app records are unaffected). */
+  NOTIFICATION_EMAIL_ENABLED: z.enum(['true', 'false']).default('true'),
+  /** Provider attempts per delivery row before it is marked FAILED (1–10). */
+  NOTIFICATION_EMAIL_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+  /** Base backoff for retry scheduling (ms); attempt N waits base·2^(N-1), capped at 1h. */
+  NOTIFICATION_EMAIL_RETRY_BASE_MS: z.coerce.number().int().positive().default(30_000),
+  /** Selection/SMTP timeout per email attempt (ms). */
+  EMAIL_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  /** Upper bound on recipients notified by ONE fan-out event (queue-wide events). */
+  NOTIFICATION_MAX_RECIPIENTS: z.coerce.number().int().positive().max(200).default(25),
+
   /** ── AWS (previous phase; consumed by the S3 storage driver) ──────────────── */
   AWS_REGION: optionalNonEmptyString,
   AWS_ACCESS_KEY_ID: optionalNonEmptyString,

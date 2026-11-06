@@ -16,6 +16,7 @@ import {
   type TicketListPayload,
   type TicketListSpec,
 } from './ticket.dto.js';
+import { publishTicketEvent, ticketEventKey } from './ticket.events.js';
 import {
   archiveTicketRecord,
   createTicketRecord,
@@ -167,6 +168,21 @@ export async function createTicketFlow(
       number: ticket.number,
       ...(assigneeId !== null ? { assignedTo: assigneeId.toHexString() } : {}),
     },
+  });
+
+  // Persisted → audited → published (Prompt 16 notification seam; fire-safe).
+  publishTicketEvent({
+    type: 'ticket.created',
+    workspaceId: context.workspaceId,
+    ticketId: ticket._id.toHexString(),
+    ticketNumber: ticket.number,
+    subject: ticket.subject,
+    actorId: context.actorId,
+    assigneeId: ticket.agentId?.toHexString() ?? null,
+    createdById: ticket.createdById.toHexString(),
+    eventKey: ticketEventKey(ticket._id.toHexString(), 'created', ticket.createdAt),
+    status: ticket.status,
+    priority: ticket.priority,
   });
 
   return { ticket: toTicketDto(ticket) };
@@ -338,6 +354,20 @@ export async function changeStatusFlow(
     metadata: { from: doc.status, to: updated.status },
   });
 
+  publishTicketEvent({
+    type: 'ticket.status_changed',
+    workspaceId: context.workspaceId,
+    ticketId: updated._id.toHexString(),
+    ticketNumber: updated.number,
+    subject: updated.subject,
+    actorId: context.actorId,
+    assigneeId: updated.agentId?.toHexString() ?? null,
+    createdById: updated.createdById.toHexString(),
+    eventKey: ticketEventKey(updated._id.toHexString(), 'status', updated.updatedAt),
+    from: doc.status,
+    to: updated.status,
+  });
+
   return toTicketDto(updated);
 }
 
@@ -360,6 +390,20 @@ export async function changePriorityFlow(
     actorId: new Types.ObjectId(context.actorId),
     ticketId: updated._id.toHexString(),
     metadata: { from: doc.priority, to: updated.priority },
+  });
+
+  publishTicketEvent({
+    type: 'ticket.priority_changed',
+    workspaceId: context.workspaceId,
+    ticketId: updated._id.toHexString(),
+    ticketNumber: updated.number,
+    subject: updated.subject,
+    actorId: context.actorId,
+    assigneeId: updated.agentId?.toHexString() ?? null,
+    createdById: updated.createdById.toHexString(),
+    eventKey: ticketEventKey(updated._id.toHexString(), 'priority', updated.updatedAt),
+    from: doc.priority,
+    to: updated.priority,
   });
 
   return toTicketDto(updated);
@@ -391,6 +435,27 @@ export async function assignTicketFlow(
       targetId === null
         ? { from: doc.agentId?.toHexString() ?? null }
         : { to: targetId.toHexString(), from: doc.agentId?.toHexString() ?? null },
+  });
+
+  const previousAssigneeId = doc.agentId?.toHexString() ?? null;
+  publishTicketEvent({
+    // Unassignment is published for completeness (the notification mapping
+    // ignores it: the triage queue is a view, not an inbox entry).
+    type:
+      targetId === null
+        ? 'ticket.unassigned'
+        : previousAssigneeId === null
+          ? 'ticket.assigned'
+          : 'ticket.reassigned',
+    workspaceId: context.workspaceId,
+    ticketId: updated._id.toHexString(),
+    ticketNumber: updated.number,
+    subject: updated.subject,
+    actorId: context.actorId,
+    assigneeId: updated.agentId?.toHexString() ?? null,
+    createdById: updated.createdById.toHexString(),
+    eventKey: ticketEventKey(updated._id.toHexString(), 'assignment', updated.updatedAt),
+    previousAssigneeId,
   });
 
   return toTicketDto(updated);
@@ -431,6 +496,19 @@ export async function resolveTicketFlow(
       ticketId: updated._id.toHexString(),
       metadata: { from: doc.status, to: 'RESOLVED' },
     });
+    publishTicketEvent({
+      type: 'ticket.status_changed',
+      workspaceId: context.workspaceId,
+      ticketId: updated._id.toHexString(),
+      ticketNumber: updated.number,
+      subject: updated.subject,
+      actorId: context.actorId,
+      assigneeId: updated.agentId?.toHexString() ?? null,
+      createdById: updated.createdById.toHexString(),
+      eventKey: ticketEventKey(updated._id.toHexString(), 'status', updated.updatedAt),
+      from: doc.status,
+      to: updated.status,
+    });
   }
 
   return toTicketDto(updated);
@@ -460,6 +538,20 @@ export async function reopenTicketFlow(
     actorId: new Types.ObjectId(context.actorId),
     ticketId: updated._id.toHexString(),
     metadata: { from: doc.status, to: 'OPEN' },
+  });
+
+  publishTicketEvent({
+    type: 'ticket.status_changed',
+    workspaceId: context.workspaceId,
+    ticketId: updated._id.toHexString(),
+    ticketNumber: updated.number,
+    subject: updated.subject,
+    actorId: context.actorId,
+    assigneeId: updated.agentId?.toHexString() ?? null,
+    createdById: updated.createdById.toHexString(),
+    eventKey: ticketEventKey(updated._id.toHexString(), 'status', updated.updatedAt),
+    from: doc.status,
+    to: updated.status,
   });
 
   return toTicketDto(updated);

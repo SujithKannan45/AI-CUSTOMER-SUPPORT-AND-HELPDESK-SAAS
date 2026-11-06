@@ -1,7 +1,7 @@
 import type { Types } from 'mongoose';
 
 import { AppError } from '../../core/errors/app-error.js';
-import { tenantFilter } from '../../database/tenant.js';
+import { assertTenantScope, tenantFilter } from '../../database/tenant.js';
 
 import {
   duplicateSlugError,
@@ -10,7 +10,11 @@ import {
 } from './slug.js';
 import { WorkspaceMemberModel } from './workspace-member.model.js';
 import { WorkspaceModel } from './workspace.model.js';
-import type { WorkspaceDocument, WorkspaceMemberDocument } from './workspace.types.js';
+import type {
+  WorkspaceDocument,
+  WorkspaceMemberDocument,
+  WorkspaceRole,
+} from './workspace.types.js';
 import type { CreateWorkspaceInput, UpdateWorkspaceInput } from './workspace.validation.js';
 
 /**
@@ -225,6 +229,29 @@ export async function findMembership(
   userId: Types.ObjectId,
 ): Promise<WorkspaceMemberDocument | null> {
   return WorkspaceMemberModel.findOne({ ...tenantFilter(workspaceId), userId });
+}
+
+/** Minimal member projection for recipient fan-out (Prompt 16). */
+export interface ActiveWorkspaceMember {
+  readonly userId: Types.ObjectId;
+  readonly role: WorkspaceRole;
+}
+
+/**
+ * ACTIVE members of ONE workspace (id + role only — no profile data).
+ *
+ * Used by the notification dispatcher to resolve "who on this desk should hear
+ * about this?" — the RBAC registry then decides which of them are eligible.
+ * Suspended/invited memberships are excluded, so a fan-out can never notify a
+ * person who has lost access.
+ */
+export async function listActiveWorkspaceMembers(
+  workspaceId: Types.ObjectId,
+): Promise<ActiveWorkspaceMember[]> {
+  const filter = { ...tenantFilter(workspaceId), status: 'active' as const };
+  assertTenantScope(filter, 'listActiveWorkspaceMembers');
+  const members = await WorkspaceMemberModel.find(filter).select('userId role');
+  return members.map((member) => ({ userId: member.userId, role: member.role }));
 }
 
 /**
