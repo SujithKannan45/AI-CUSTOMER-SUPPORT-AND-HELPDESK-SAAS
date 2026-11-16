@@ -195,6 +195,13 @@ escalationSchema.index(
   { workspaceId: 1, ticketId: 1, createdAt: -1 },
   { name: 'idx_escalations_by_ticket' },
 );
+// Prompt 17 added a customer reference filter to the queue listing; the
+// workspace-leading compound keeps that scan inside one tenant slice and
+// ordered by the default newest-first sort.
+escalationSchema.index(
+  { workspaceId: 1, customerId: 1, createdAt: -1 },
+  { name: 'idx_escalations_by_customer' },
+);
 escalationSchema.index({ workspaceId: 1, createdAt: -1 }, { name: 'idx_escalations_by_created' });
 
 export const EscalationModel = model<EscalationDocument, Model<EscalationDocument>>(

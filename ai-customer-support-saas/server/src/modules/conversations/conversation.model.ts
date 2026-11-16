@@ -68,6 +68,13 @@ conversationSchema.index(
   { workspaceId: 1, lastMessageAt: -1 },
   { name: 'idx_conversations_recent' },
 );
+// Prompt 17's workspace-wide conversation search sorts by recent activity
+// (`updatedAt`); this keeps the sort inside an index instead of an in-memory
+// sort of the tenant's conversations.
+conversationSchema.index(
+  { workspaceId: 1, updatedAt: -1 },
+  { name: 'idx_conversations_by_updated' },
+);
 
 export const ConversationModel = model<ConversationDocument, Model<ConversationDocument>>(
   'Conversation',

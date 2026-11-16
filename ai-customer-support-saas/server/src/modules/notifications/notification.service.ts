@@ -69,6 +69,9 @@ export async function listNotificationsFlow(
     ...(query.type !== undefined ? { type: query.type } : {}),
     ...(query.entityType !== undefined ? { entityType: query.entityType } : {}),
     ...(query.entityId !== undefined ? { entityId: query.entityId } : {}),
+    ...(query.search !== undefined ? { search: query.search } : {}),
+    ...(query.createdFrom !== undefined ? { createdFrom: new Date(query.createdFrom) } : {}),
+    ...(query.createdTo !== undefined ? { createdTo: new Date(query.createdTo) } : {}),
   });
 
   return {

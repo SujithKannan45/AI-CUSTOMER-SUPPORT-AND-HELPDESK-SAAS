@@ -180,6 +180,7 @@ All tenant-owned indexes lead with `workspaceId` (shared-pool tenancy).
 | conversations      | `{ workspaceId: 1, ticketId: 1 }` UNIQUE       | ONE primary conversation per ticket — the database-enforced design law; also the get-or-create race arbiter |
 | conversations      | `{ workspaceId: 1, customerId: 1, updatedAt: -1 }` | The customer's conversation list (customerId copied from the ticket at creation) |
 | conversations      | `{ workspaceId: 1, lastMessageAt: -1 }`        | Workspace inbox / recent-activity views (Prompt 10 reads this shape) |
+| conversations      | `{ workspaceId: 1, updatedAt: -1 }`            | Prompt 17 workspace-wide conversation search: subject matches ordered by recent activity, inside one tenant slice |
 | messages           | `{ workspaceId: 1, conversationId: 1, createdAt: 1 }` | Chronological thread reads (pagination sorts `{ createdAt: 1, _id: 1 }` for a stable per-millisecond order) |
 | messages           | `{ workspaceId: 1, ticketId: 1, createdAt: -1 }` | "Everything sent about this ticket" (ticket-scoped search/export) — cheap because `ticketId` is denormalized server-side |
 | audit_logs         | `{ workspaceId: 1, createdAt: -1 }`                | Workspace activity feed, retention scans |
@@ -189,6 +190,7 @@ All tenant-owned indexes lead with `workspaceId` (shared-pool tenancy).
 | escalations        | `{ workspaceId, status, priorityRank: -1, createdAt: -1 }` | Escalation queue board: status filter, urgency-weighted order |
 | escalations        | `{ workspaceId, eligibleAssigneeId, updatedAt: -1 }` | Assigned work lists ("handoffs assigned to agent X") |
 | escalations        | `{ workspaceId, ticketId, createdAt: -1 }` | Ticket drill-down: the handoff story of one ticket |
+| escalations        | `{ workspaceId, customerId, createdAt: -1 }` | Prompt 17 customer reference filter on the queue listing |
 | escalations        | `{ workspaceId, createdAt: -1 }` | Queue listing fallback and date filters |
 | refresh_tokens     | `{ tokenHash: 1 }` unique (field `select: false`)  | Refresh-endpoint lookup by hash — raw tokens are never stored |
 | refresh_tokens     | `{ familyId: 1 }`                                  | Rotation chains + family-wide revocation (reuse = theft) |
@@ -199,6 +201,34 @@ Deliberately **not** added: a text index on customer name/email (future
 Atlas Search), an index on `workspaces.ownerId` (membership is the access
 path), a TTL index on `audit_logs` (retention is a compliance decision for
 the deploy phase).
+
+### Search-supporting indexes (Prompt 17)
+
+Search is MongoDB **literal-substring regex** matching (`$regex` + `$options:
+'i'` over escaped terms). Substring regex cannot use a B-tree index, so the
+scan is bounded by the workspace slice and the page limit, and no index is
+added for the match itself — an index that cannot serve the predicate would
+only add write cost. The two indexes Prompt 17 DID add serve the FILTER/SORT
+shapes it introduced (both lead with `workspaceId`, per the tenancy law):
+
+- `conversations` `{ workspaceId, updatedAt: -1 }` — the unified search's
+  conversation branch sorts by recent activity; without it the sort falls
+  back to an in-memory sort of the tenant's conversations.
+- `escalations` `{ workspaceId, customerId, createdAt: -1 }` — the new
+  customer reference filter on the escalation queue.
+
+Existing indexes that already cover Prompt 17 shapes: tickets
+`{ workspaceId, status, priorityRank, createdAt }` and
+`{ workspaceId, createdAt/updatedAt }`, customers `{ workspaceId, status }`
+and `{ workspaceId, createdAt/updatedAt }`, KB articles
+`{ workspaceId, status, title }`, `{ workspaceId, createdAt/updatedAt }`,
+escalations `{ workspaceId, ticketId, createdAt }` and
+`{ workspaceId, status, priorityRank, createdAt }`, notifications
+`{ workspaceId, recipientId, createdAt, _id }` and
+`{ workspaceId, recipientId, readAt }`, messages
+`{ workspaceId, conversationId, createdAt }`. No index was removed and none
+was added speculatively; there is no text index, Atlas Search index or
+Elasticsearch cluster in this deployment.
 
 ## Tenant isolation
 

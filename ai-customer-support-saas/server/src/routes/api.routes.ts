@@ -14,6 +14,7 @@ import { publicKnowledgeBaseRouter } from '../modules/knowledge-base/kb-public.r
 import { knowledgeBaseRouter } from '../modules/knowledge-base/kb.routes.js';
 import { notificationRouter } from '../modules/notifications/notification.routes.js';
 import { ragRouter } from '../modules/rag/rag.routes.js';
+import { searchRouter } from '../modules/search/search.routes.js';
 import { ticketRouter } from '../modules/tickets/ticket.routes.js';
 import { workspaceRouter } from '../modules/workspaces/workspace.routes.js';
 
@@ -68,6 +69,14 @@ apiRouter.use('/workspaces/:workspaceId/escalations', escalationRouter);
 // `/read-all` and `/preferences`. SELF-scoped: the recipient is always
 // `req.auth.userId`, never a path/body value — so no cross-user surface exists.
 apiRouter.use('/workspaces/:workspaceId/notifications', notificationRouter);
+// Unified workspace search (Prompt 17) under the SAME tenant context:
+// `/search?q=…&types=…&limit=…` returns a bounded, permission-filtered
+// preview across tickets, customers, KB articles, escalations, conversations
+// and the CALLER'S OWN notifications. Per-entity RBAC is applied in the
+// service; message search stays conversation-scoped at
+// `/conversations/:id/messages?search=` where the visibility law can be
+// enforced inside the query.
+apiRouter.use('/workspaces/:workspaceId/search', searchRouter);
 apiRouter.use('/public/knowledge-base', publicKnowledgeBaseRouter);
 // Customer routes nest under the workspace tenant context:
 // `/api/v1/workspaces/:workspaceId/customers` carries the parent's

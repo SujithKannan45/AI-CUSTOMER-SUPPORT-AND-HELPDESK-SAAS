@@ -1,5 +1,6 @@
 import { type Types, type FilterQuery } from 'mongoose';
 
+import { literalSearchOr } from '../../core/query/search-query.js';
 import { assertTenantScope, tenantFilter } from '../../database/tenant.js';
 
 import { MessageModel } from './conversation.model.js';
@@ -59,6 +60,8 @@ export interface MessageListSpec {
    * IN THE QUERY — the caller never receives them to scrub later.
    */
   readonly publicOnly: boolean;
+  /** Optional literal substring over the message body (Prompt 17). */
+  readonly search?: string;
 }
 
 export interface MessageListResult {
@@ -75,6 +78,11 @@ export async function listMessages(spec: MessageListSpec): Promise<MessageListRe
   };
   if (spec.publicOnly) {
     filter['visibility'] = 'PUBLIC';
+  }
+  if (spec.search !== undefined) {
+    // Composed AFTER the visibility predicate, so the search can only narrow
+    // what the caller was already allowed to read. Escaped literal body match.
+    filter['$or'] = literalSearchOr(['body'], spec.search);
   }
   assertTenantScope(filter, 'listMessages');
 

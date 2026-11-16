@@ -1,6 +1,7 @@
 import { type Types, type FilterQuery } from 'mongoose';
 
 import { AppError } from '../../core/errors/index.js';
+import { literalSearchOr } from '../../core/query/search-query.js';
 import {
   assertTenantScope,
   tenantFilter,
@@ -132,16 +133,12 @@ export async function listCustomers(spec: CustomerListSpec): Promise<CustomerLis
   if (spec.tags !== undefined && spec.tags.length > 0) filter['tags'] = { $all: spec.tags };
 
   if (spec.search !== undefined) {
-    // Case-insensitive substring over name OR email. Escaped so regex
-    // metacharacters in the search term match literally. Block-level
-    // tradeoff (documented in the model): this scans the tenant's slice of
-    // the collection — bounded by the tenant size and pageSize — and is
-    // replaced by Atlas Search when the directory scale demands it.
-    const escaped = spec.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    filter['$or'] = [
-      { name: { $regex: escaped, $options: 'i' } },
-      { email: { $regex: escaped, $options: 'i' } },
-    ];
+    // Case-insensitive LITERAL substring over name, email or phone (Prompt 17
+    // scope). Escaping is centralised in core/query so user input can never
+    // execute as a regex. Tradeoff (documented in the model): the substring
+    // scan reads the tenant's slice — bounded by tenant size and pageSize —
+    // and is replaced by Atlas Search when the directory scale demands it.
+    filter['$or'] = literalSearchOr(['name', 'email', 'phone'], spec.search);
   }
 
   if (spec.createdFrom !== undefined || spec.createdTo !== undefined) {

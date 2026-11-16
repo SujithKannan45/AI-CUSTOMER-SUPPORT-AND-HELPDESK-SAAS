@@ -151,6 +151,14 @@ export const listMessagesQuerySchema = z
       .min(1)
       .max(MAX_PAGE_SIZE, `Page size must be at most ${MAX_PAGE_SIZE}`)
       .default(20),
+    /**
+     * Optional literal substring over message BODY inside ONE authorized
+     * conversation (Prompt 17). Visibility rules still apply IN THE QUERY:
+     * callers without staff visibility never receive INTERNAL notes, so a
+     * search can never surface one — there is no cross-workspace message
+     * search surface at all.
+     */
+    search: z.string().trim().min(1).max(MAX_SEARCH_LENGTH).optional(),
   })
   .strict();
 
@@ -162,6 +170,7 @@ export interface ListConversationsQuery {
 export interface ListMessagesQuery {
   page: number;
   limit: number;
+  search?: string;
 }
 
 /**

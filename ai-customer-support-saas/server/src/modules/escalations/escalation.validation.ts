@@ -59,6 +59,15 @@ const pagingSchema = {
   limit: z.coerce.number().int().min(1).max(100).default(20),
 };
 
+/** ISO-8601 datetime (offset allowed) — the project's date-input convention. */
+const isoDateSchema = z.string().trim().datetime({ offset: true });
+
+/**
+ * Listing query (Prompt 17 extended it with search, reference and date
+ * filters plus an allowlisted sort). Every value here is a SCALAR the service
+ * maps onto allowlisted repository fields — no client object ever reaches
+ * Mongo, and unknown keys are rejected by `.strict()`.
+ */
 export const listEscalationsQuerySchema = z
   .object({
     ...pagingSchema,
@@ -75,8 +84,24 @@ export const listEscalationsQuerySchema = z
       ])
       .optional(),
     assignedToId: objectIdSchema.optional(),
+    /** Literal substring over reason/topic machine codes (workspace-scoped). */
+    search: z.string().trim().min(1).max(100).optional(),
+    ticketId: objectIdSchema.optional(),
+    conversationId: objectIdSchema.optional(),
+    customerId: objectIdSchema.optional(),
+    createdFrom: isoDateSchema.optional(),
+    createdTo: isoDateSchema.optional(),
+    sort: z.enum(['createdAt', 'updatedAt', 'priority']).optional(),
+    order: z.enum(['asc', 'desc']).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (query) =>
+      query.createdFrom === undefined ||
+      query.createdTo === undefined ||
+      new Date(query.createdFrom).getTime() <= new Date(query.createdTo).getTime(),
+    { message: 'createdFrom must not be after createdTo', path: ['createdFrom'] },
+  );
 export interface ListEscalationsQuery {
   readonly page: number;
   readonly limit: number;
@@ -90,6 +115,14 @@ export interface ListEscalationsQuery {
     | 'TECHNICAL_FAILURE'
     | 'MANUAL';
   readonly assignedToId?: string;
+  readonly search?: string;
+  readonly ticketId?: string;
+  readonly conversationId?: string;
+  readonly customerId?: string;
+  readonly createdFrom?: string;
+  readonly createdTo?: string;
+  readonly sort?: 'createdAt' | 'updatedAt' | 'priority';
+  readonly order?: 'asc' | 'desc';
 }
 
 // ── Lifecycle actions ────────────────────────────────────────────────────────

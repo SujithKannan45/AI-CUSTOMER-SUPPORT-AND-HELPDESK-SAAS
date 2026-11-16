@@ -295,6 +295,8 @@ export interface KbArticleFilterSpec {
   readonly page: number;
   readonly limit: number;
   readonly search?: string;
+  /** Unified search (Prompt 17): DRAFT + PUBLISHED, never ARCHIVED content. */
+  readonly excludeArchived?: boolean;
   readonly categoryId?: string;
   readonly tags?: string[];
   readonly status?: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';

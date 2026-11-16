@@ -1,6 +1,7 @@
 import { Types, type FilterQuery } from 'mongoose';
 
 import { AppError } from '../../core/errors/index.js';
+import { literalSearchOr } from '../../core/query/search-query.js';
 import { assertTenantScope, tenantFilter } from '../../database/tenant.js';
 
 import type { KbArticleFilterSpec } from './kb.dto.js';
@@ -267,6 +268,12 @@ export async function listArticles(
   assertTenantScope(filter, 'listArticles');
 
   if (spec.status !== undefined) filter['status'] = spec.status;
+  // Unified search (Prompt 17) asks for every live status without archiving
+  // content into a global result list; management listings keep composing
+  // explicit status filters (no hidden default scope, see kb.model.ts).
+  if (spec.excludeArchived === true && spec.status === undefined) {
+    filter['status'] = { $ne: 'ARCHIVED' };
+  }
   if (spec.categoryId !== undefined) filter['categoryId'] = new Types.ObjectId(spec.categoryId);
   if (spec.authorId !== undefined) filter['createdById'] = new Types.ObjectId(spec.authorId);
   if (spec.tags !== undefined && spec.tags.length > 0) {
@@ -289,16 +296,11 @@ export async function listArticles(
   for (const [key, value] of Object.entries(dateRanges)) filter[key] = value;
 
   if (spec.search !== undefined && spec.search.length > 0) {
-    // Tenant-slice case-insensitive substring scan on title + summary — the
-    // same documented tradeoff as customers/tickets (no text index yet; the
-    // future AI retrieval phase supersedes it, so an Atlas Search dependency
-    // is deliberately deferred). Regex metacharacters are escaped; no client
-    // string is ever evaluated as a query object.
-    const escaped = spec.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    filter['$or'] = [
-      { title: { $regex: escaped, $options: 'i' } },
-      { summary: { $regex: escaped, $options: 'i' } },
-    ];
+    // Tenant-slice case-insensitive LITERAL substring scan on title, summary
+    // and body — the same documented tradeoff as customers/tickets (no text
+    // index yet; Atlas Search is deliberately deferred). Escaping lives in
+    // core/query, so no client string is ever evaluated as a query object.
+    filter['$or'] = literalSearchOr(['title', 'summary', 'body'], spec.search);
   }
 
   const direction = spec.order === 'asc' ? 1 : -1;

@@ -1,6 +1,7 @@
-import { type FilterQuery, type Types } from 'mongoose';
+import { Types, type FilterQuery } from 'mongoose';
 
 import { AppError } from '../../core/errors/app-error.js';
+import { literalSearchOr } from '../../core/query/search-query.js';
 import { assertTenantScope, tenantFilter } from '../../database/tenant.js';
 
 import {
@@ -145,6 +146,16 @@ export interface EscalationListSpec {
   readonly priority?: EscalationPriority;
   readonly triggerType?: EscalationTriggerType;
   readonly eligibleAssigneeId?: Types.ObjectId | null;
+  /** Literal substring over machine reason/topic codes (Prompt 17). */
+  readonly search?: string;
+  readonly ticketId?: string;
+  readonly conversationId?: string;
+  readonly customerId?: string;
+  readonly createdFrom?: Date;
+  readonly createdTo?: Date;
+  /** Allowlisted sort: `priority` maps to the derived priorityRank. */
+  readonly sort?: 'createdAt' | 'updatedAt' | 'priority';
+  readonly order?: 'asc' | 'desc';
 }
 
 export interface EscalationListResult {
@@ -164,11 +175,43 @@ export async function listEscalations(spec: EscalationListSpec): Promise<Escalat
   if (spec.eligibleAssigneeId !== undefined) {
     filter['eligibleAssigneeId'] = spec.eligibleAssigneeId;
   }
+  // Reference filters are ids VALIDATED upstream; expressions are composed
+  // here from allowlisted field names only (never a client query object).
+  if (spec.ticketId !== undefined) filter['ticketId'] = new Types.ObjectId(spec.ticketId);
+  if (spec.conversationId !== undefined) {
+    filter['conversationId'] = new Types.ObjectId(spec.conversationId);
+  }
+  if (spec.customerId !== undefined) filter['customerId'] = new Types.ObjectId(spec.customerId);
+
+  if (spec.createdFrom !== undefined || spec.createdTo !== undefined) {
+    filter['createdAt'] = {
+      ...(spec.createdFrom !== undefined ? { $gte: spec.createdFrom } : {}),
+      ...(spec.createdTo !== undefined ? { $lte: spec.createdTo } : {}),
+    };
+  }
+
+  if (spec.search !== undefined) {
+    // Reason/topic codes are MACHINE identifiers; searching them is safe
+    // reference lookup. Escaped literals, tenant-scoped, bounded by page
+    // size — the same documented tenant-slice scan as the other modules.
+    filter['$or'] = literalSearchOr(['reasonCode', 'topicKey'], spec.search);
+  }
   assertTenantScope(filter, 'listEscalations');
+
+  const direction: 1 | -1 = spec.order === 'asc' ? 1 : -1;
+  let sort: Record<string, 1 | -1>;
+  if (spec.sort === undefined) {
+    // Default queue order is preserved exactly as before Prompt 17.
+    sort = { priorityRank: -1, createdAt: -1, _id: 1 };
+  } else if (spec.sort === 'priority') {
+    sort = { priorityRank: direction, _id: direction };
+  } else {
+    sort = { [spec.sort]: direction, _id: direction };
+  }
 
   const [items, total] = await Promise.all([
     EscalationModel.find(filter)
-      .sort({ priorityRank: -1, createdAt: -1, _id: 1 })
+      .sort(sort)
       .skip((spec.page - 1) * spec.limit)
       .limit(spec.limit),
     EscalationModel.countDocuments(filter),

@@ -691,6 +691,91 @@ exhaustion/invalid-recipient, duplicate-event idempotency, publisher failure)
 against in-memory Mongo and mock provider objects — no live SMTP, Redis or
 Atlas.
 
+## Search, filtering & pagination (Prompt 17, implemented)
+
+One shared primitive module (`core/query/search-query.ts`) owns literal
+regex escaping (`escapeRegexLiteral` / `literalSearchOr`), the bounded
+search-term schema (≤100 chars) and the page/limit factory. Every searcher
+composes through it, so a user term can never execute as a regex — the
+escape exists in exactly one place. Module repositories keep constructing
+queries; controllers stay one-line HTTP adapters.
+
+**Module search extensions** (existing endpoints, additive query params,
+all `.strict()` — unknown keys are 422):
+
+| Entity | Searchable fields | New filters/sort (Prompt 17) |
+| --- | --- | --- |
+| Tickets | number, subject, **description** | (status/priority/agent/customer/tags/created+updated ranges/sort already existed) |
+| Customers | name, email, **phone** | (status/tags/date range/sort already existed) |
+| KB articles | title, summary, **body** | management listing unchanged; unified search passes `excludeArchived` |
+| Escalations | reasonCode, topicKey | `ticketId`, `conversationId`, `customerId`, `createdFrom/To`, `sort=createdAt\|updatedAt\|priority`, `order` |
+| Notifications | title, body | `createdFrom/To` (recipient scope is structural) |
+| Messages | body (one conversation only) | `search` on `GET …/conversations/:id/messages` |
+
+**Unified endpoint** — `GET /api/v1/workspaces/:workspaceId/search`
+(`requireAuth → 60/min limiter → validate(params) →
+requireWorkspaceContext → validate(query)`):
+
+```
+?q=<1..100 chars literal term>   required
+?types=ticket,customer,knowledge_base_article,escalation,conversation,notification
+?limit=1..25 (default 10, PER TYPE)
+```
+
+- It is a bounded **preview**, not a paginated authority: no cursor, no
+  totals, no deep paging. The module endpoints remain the paginated read
+  paths.
+- RBAC is applied per entity BEFORE querying (`ticket.view`,
+  `customer.view`, `kb.view`, `escalation.view`, `conversation.view`). A type
+  the role cannot read is reported in `skippedTypes`, never queried — so its
+  results cannot hint at record existence. No current role lacks any of
+  those read scopes (viewer holds all five), so `skippedTypes` is empty in
+  practice today; the mechanism is what matters when a narrower role or
+  permission is added.
+- Notifications are self-scoped by construction (`recipientId = req.auth`,
+  no permission gate) — exactly the Prompt 16 inbox law.
+- Results carry `type`, `id`, a short `title`, optional `snippet` and string
+  `metadata` only. Customer email/phone, ticket descriptions, message bodies,
+  internal notes and file content never enter unified results — the fan-out
+  maps each module's existing DTO-level fields and stops there.
+- Messages are deliberately NOT in unified search: message search is
+  conversation-scoped (`…/conversations/:id/messages?search=`), where the
+  existing conversation authorization proves access and the visibility
+  predicate excludes INTERNAL notes IN THE QUERY for roles without staff
+  visibility.
+
+**Pagination strategy (unchanged contract, tightened inputs).** The project
+established page/limit before Prompt 17; replacing it with cursors would
+have rewritten every list endpoint and its clients for no measured gain, so
+the strategy is standardised instead: `page ≥ 1`, `limit` default 20, hard
+caps 50 (tickets/customers/KB/conversations/messages/workspaces) and 100
+(escalations/notifications), invalid values 422, deterministic sort with an
+`_id` tiebreak everywhere (no duplicates/skips across sequential pages),
+empty past-the-end pages return `hasMore: false` with `total` intact, and
+`total` is only computed where the existing contract returns it (one
+`countDocuments` per list — documented cost, not hidden). Unified search
+returns counts per type instead of a `total`.
+
+**Security summary.** Every query is composed inside
+`tenantFilter()`/`assertTenantScope()`; foreign ids in reference filters
+(`ticketId`, `customerId`, …) are ordinary filters, so they return zero rows
+with no existence oracle; the workspace always comes from the validated
+middleware context; notification search composes on top of `recipientId`;
+operator-shaped params (`search[$ne]`) are rejected by the strict string
+schemas (422); malformed cursors are moot (no cursor API). Audit is
+unchanged: search is read-only and writes no audit rows.
+
+**Capability honesty.** This is ordinary MongoDB querying: case-insensitive
+literal substring matching over allowlisted fields, with no relevance
+ranking, fuzzy matching, Atlas Search, Elasticsearch, Redis or new
+infrastructure. Substring scans read the tenant's slice (bounded by tenant
+size and page limit); there is no text index. Prompt 13's RAG/vector
+retrieval is untouched — this prompt is application search only.
+
+**Verification** — `npm run verify:search` (77 checks: module search,
+regex-literal safety, filters, pagination, tenant isolation, notification
+recipient isolation, internal-note privacy, unified search RBAC fan-out).
+
 ## Authentication (implemented)
 
 Short-lived **access JWTs** + long-lived **opaque rotating refresh tokens**:

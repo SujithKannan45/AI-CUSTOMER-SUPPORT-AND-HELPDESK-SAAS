@@ -1,5 +1,6 @@
 import { type FilterQuery, Types } from 'mongoose';
 
+import { literalSearchOr } from '../../core/query/search-query.js';
 import { assertTenantScope, tenantFilter } from '../../database/tenant.js';
 
 import {
@@ -82,6 +83,10 @@ export interface ListNotificationsSpec {
   readonly type?: NotificationType;
   readonly entityType?: NotificationEntityType;
   readonly entityId?: string;
+  /** Literal substring over THIS recipient's title/body (Prompt 17). */
+  readonly search?: string;
+  readonly createdFrom?: Date;
+  readonly createdTo?: Date;
 }
 
 export interface ListNotificationsResult {
@@ -101,6 +106,19 @@ export async function listNotifications(
     ...(spec.entityType !== undefined ? { entityType: spec.entityType } : {}),
     ...(spec.entityId !== undefined ? { entityId: new Types.ObjectId(spec.entityId) } : {}),
   };
+
+  if (spec.createdFrom !== undefined || spec.createdTo !== undefined) {
+    filter['createdAt'] = {
+      ...(spec.createdFrom !== undefined ? { $gte: spec.createdFrom } : {}),
+      ...(spec.createdTo !== undefined ? { $lte: spec.createdTo } : {}),
+    };
+  }
+  if (spec.search !== undefined) {
+    // Search composes ON TOP of the mandatory `recipientId` predicate above,
+    // so it can only ever narrow this caller's own inbox. Escaped literal,
+    // bounded by page size — notification titles/bodies are short by schema.
+    filter['$or'] = literalSearchOr(['title', 'body'], spec.search);
+  }
   assertTenantScope(filter, 'listNotifications');
 
   const skip = (spec.page - 1) * spec.limit;

@@ -1,6 +1,7 @@
 import { Types, type FilterQuery } from 'mongoose';
 
 import { AppError } from '../../core/errors/index.js';
+import { literalSearchOr } from '../../core/query/search-query.js';
 import { assertTenantScope, tenantFilter } from '../../database/tenant.js';
 
 import { isDuplicateTicketNumberError, nextTicketNumber } from './ticket-counter.model.js';
@@ -133,15 +134,12 @@ export async function listTickets(spec: TicketListSpec): Promise<TicketListResul
   if (spec.tags !== undefined && spec.tags.length > 0) filter['tags'] = { $all: spec.tags };
 
   if (spec.search !== undefined) {
-    // Case-insensitive substring over number OR subject. Escaped so regex
-    // metacharacters in the search term match literally. Block-level
-    // tradeoff (documented in the model): scans the tenant's slice —
-    // replaced by Atlas Search when scale demands it.
-    const escaped = spec.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    filter['$or'] = [
-      { number: { $regex: escaped, $options: 'i' } },
-      { subject: { $regex: escaped, $options: 'i' } },
-    ];
+    // Case-insensitive LITERAL substring over number, subject or description
+    // (Prompt 17 scope). Escaping is centralised in core/query so user input
+    // can never execute as a regex. Tradeoff (documented in the model): the
+    // substring scan reads the tenant's slice — replaced by Atlas Search when
+    // scale demands it. It never widens beyond `tenantFilter()`.
+    filter['$or'] = literalSearchOr(['number', 'subject', 'description'], spec.search);
   }
 
   if (spec.createdFrom !== undefined || spec.createdTo !== undefined) {

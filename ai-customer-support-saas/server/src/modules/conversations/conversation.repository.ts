@@ -1,6 +1,7 @@
 import { type Types, type FilterQuery } from 'mongoose';
 
 import { AppError } from '../../core/errors/index.js';
+import { literalSearchOr } from '../../core/query/search-query.js';
 import { assertTenantScope, tenantFilter } from '../../database/tenant.js';
 
 import type { ConversationListSpec } from './conversation.dto.js';
@@ -125,6 +126,32 @@ export async function findConversationByTicket(
   };
   assertTenantScope(filter, 'findConversationByTicket');
   return ConversationModel.findOne(filter);
+}
+
+export interface ConversationSearchSpec {
+  readonly workspaceId: Types.ObjectId;
+  /** Literal substring over the conversation subject (Prompt 17). */
+  readonly search: string;
+  /** Bounded result cap — unified search never paginates deep. */
+  readonly limit: number;
+}
+
+/**
+ * Workspace-wide conversation search by SUBJECT only (Prompt 17 unified
+ * search). Message content is deliberately excluded here: message search is
+ * conversation-scoped so the existing visibility law (INTERNAL notes are
+ * staff-only by query) is enforced at the only place it can be. Tenant scope
+ * is composed inside this query; foreign rows are unreachable.
+ */
+export async function searchConversations(
+  spec: ConversationSearchSpec,
+): Promise<readonly ConversationDocument[]> {
+  const filter: FilterQuery<ConversationDocument> = {
+    ...tenantFilter(spec.workspaceId),
+    $or: literalSearchOr(['subject'], spec.search),
+  };
+  assertTenantScope(filter, 'searchConversations');
+  return ConversationModel.find(filter).sort({ updatedAt: -1, _id: -1 }).limit(spec.limit);
 }
 
 export interface ConversationListResult {

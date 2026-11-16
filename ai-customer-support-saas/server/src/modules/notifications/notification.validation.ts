@@ -42,6 +42,15 @@ export interface NotificationParams {
   readonly notificationId: string;
 }
 
+/** ISO-8601 datetime (offset allowed) — the project's date-input convention. */
+const isoDateSchema = z.string().trim().datetime({ offset: true });
+
+/**
+ * Inbox listing (Prompt 17 added search + creation-date filters). The
+ * recipient is STRUCTURALLY absent: it is always `req.auth.userId`, so no
+ * query value can address another user's inbox. `sort` is deliberately not
+ * offered — newest-first is the inbox's semantic order, not a preference.
+ */
 export const listNotificationsQuerySchema = z
   .object({
     page: z.coerce.number().int().positive().max(10_000).default(1),
@@ -54,8 +63,19 @@ export const listNotificationsQuerySchema = z
     type: z.enum(NOTIFICATION_TYPES).optional(),
     entityType: z.enum(NOTIFICATION_ENTITY_TYPES).optional(),
     entityId: objectIdSchema.optional(),
+    /** Literal substring over the caller's notification title/body. */
+    search: z.string().trim().min(1).max(100).optional(),
+    createdFrom: isoDateSchema.optional(),
+    createdTo: isoDateSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (query) =>
+      query.createdFrom === undefined ||
+      query.createdTo === undefined ||
+      new Date(query.createdFrom).getTime() <= new Date(query.createdTo).getTime(),
+    { message: 'createdFrom must not be after createdTo', path: ['createdFrom'] },
+  );
 export interface ListNotificationsQuery {
   readonly page: number;
   readonly limit: number;
@@ -63,6 +83,9 @@ export interface ListNotificationsQuery {
   readonly type?: NotificationType;
   readonly entityType?: NotificationEntityType;
   readonly entityId?: string;
+  readonly search?: string;
+  readonly createdFrom?: string;
+  readonly createdTo?: string;
 }
 
 /**

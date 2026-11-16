@@ -392,6 +392,7 @@ export async function listMessagesFlow(
     page: query.page,
     limit: query.limit,
     publicOnly,
+    ...(query.search !== undefined ? { search: query.search } : {}),
   });
 
   // Metadata self-heals on read (documented no-transaction fallback): any

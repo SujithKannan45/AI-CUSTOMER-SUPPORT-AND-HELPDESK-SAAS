@@ -481,6 +481,14 @@ export async function listEscalationsFlow(
     ...(query.priority !== undefined ? { priority: query.priority } : {}),
     ...(query.triggerType !== undefined ? { triggerType: query.triggerType } : {}),
     ...(query.assignedToId !== undefined ? { eligibleAssigneeId: new Types.ObjectId(query.assignedToId) } : {}),
+    ...(query.search !== undefined ? { search: query.search } : {}),
+    ...(query.ticketId !== undefined ? { ticketId: query.ticketId } : {}),
+    ...(query.conversationId !== undefined ? { conversationId: query.conversationId } : {}),
+    ...(query.customerId !== undefined ? { customerId: query.customerId } : {}),
+    ...(query.createdFrom !== undefined ? { createdFrom: new Date(query.createdFrom) } : {}),
+    ...(query.createdTo !== undefined ? { createdTo: new Date(query.createdTo) } : {}),
+    ...(query.sort !== undefined ? { sort: query.sort } : {}),
+    ...(query.order !== undefined ? { order: query.order } : {}),
   });
   return toEscalationListPayload(result, query);
 }
