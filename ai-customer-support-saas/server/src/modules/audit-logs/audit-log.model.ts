@@ -155,6 +155,13 @@ auditLogSchema.index(
   { name: 'idx_audit_by_resource' },
 );
 auditLogSchema.index({ workspaceId: 1, actorId: 1, createdAt: -1 }, { name: 'idx_audit_by_actor' });
+// Prompt 18: AI analytics range-scans ONE resource type
+// (`agent_response`) inside a workspace and a time window. The resource index
+// also carries `resourceId`, so it cannot order that window.
+auditLogSchema.index(
+  { workspaceId: 1, resourceType: 1, createdAt: -1 },
+  { name: 'idx_audit_by_type_date' },
+);
 
 const AuditLogModelBase = model<AuditLogDocument>('AuditLog', auditLogSchema, 'audit_logs');
 

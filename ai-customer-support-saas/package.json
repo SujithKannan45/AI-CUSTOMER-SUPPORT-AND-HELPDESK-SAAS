@@ -38,6 +38,7 @@
     "verify:escalations": "tsx scripts/verify-escalations.ts",
     "verify:notifications": "tsx scripts/verify-notifications.ts",
     "verify:search": "tsx scripts/verify-search.ts",
+    "verify:analytics": "tsx scripts/verify-analytics.ts",
     "seed:dev": "tsx scripts/seed-dev-data.ts"
   },
   "devDependencies": {

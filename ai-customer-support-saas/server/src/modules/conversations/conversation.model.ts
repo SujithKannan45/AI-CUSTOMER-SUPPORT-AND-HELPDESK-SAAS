@@ -159,6 +159,13 @@ messageSchema.index(
   { workspaceId: 1, ticketId: 1, createdAt: -1 },
   { name: 'idx_messages_by_ticket' },
 );
+// Prompt 18: message-volume analytics groups messages of ONE workspace inside
+// a creation window. The chronological index is conversation-prefixed, so it
+// cannot serve a workspace-wide time range; this one can.
+messageSchema.index(
+  { workspaceId: 1, createdAt: -1 },
+  { name: 'idx_messages_by_created' },
+);
 
 export const MessageModel = model<MessageDocument, Model<MessageDocument>>(
   'Message',

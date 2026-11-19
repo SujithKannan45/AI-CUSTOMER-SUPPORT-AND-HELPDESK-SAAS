@@ -776,6 +776,93 @@ retrieval is untouched — this prompt is application search only.
 regex-literal safety, filters, pagination, tenant isolation, notification
 recipient isolation, internal-note privacy, unified search RBAC fan-out).
 
+## Analytics & reporting (Prompt 18, implemented)
+
+Read-only workspace analytics (`modules/analytics/`) computed on request from
+the records the existing modules already persist. No new collection, no
+pre-aggregation/rollup store, no AI/RAG change, no queue. Endpoints share one
+gate chain — `requireAuth → 60/min limiter → validate(params) →
+requireWorkspaceContext → requirePermission('analytics.view') →
+validate(query)` — so the workspace comes from `req.workspace` and the actor
+from `req.auth`; no client-supplied id can widen scope. `analytics.view`
+already existed and is granted to owner/admin only, so agents and viewers get
+403 while strangers get 404 concealment.
+
+| Endpoint (`/api/v1/workspaces/:workspaceId/analytics`) | Purpose |
+| --- | --- |
+| `GET /overview` | KPI snapshot: tickets, customers, conversations, escalations, KB, AI |
+| `GET /tickets` | Status/priority/assignment breakdowns, created/resolved trends, resolution durations |
+| `GET /performance` | Backlog, unassigned work, first staff reply, escalation ratio, message volume |
+| `GET /ai` | Audit-trail-derived AI outcomes, citations, abstentions, handoffs, trend |
+| `GET /reports/tickets.csv` | Bounded ticket CSV (machine fields only) |
+
+**Window semantics.** `from` is inclusive, `to` is exclusive, on every endpoint
+and aggregation, so adjacent windows never double-count. Presets are
+`today` (current UTC day start → now), `7d`, `30d` (default), `90d`; `custom`
+requires both bounds and cannot be combined with a preset. Bounds are ISO-8601
+datetimes with an offset, strictly ordered, and capped at 366 days; violations
+are 422. Unknown query keys and operator-shaped params are rejected by strict
+schemas. All computation is UTC, including `$dateTrunc` buckets (week starts
+Monday, month starts on the 1st); series are zero-filled across the window.
+
+**Metric definitions (every value traces to a persisted field).**
+
+| Metric | Source / definition |
+| --- | --- |
+| `tickets.total`, `byStatus`, `byPriority`, `assignment`, `topAssignees` | live tickets (`deletedAt: null`); snapshot counts, not windowed; assignees are top 10 agent ids by count, id tiebreak, ids only |
+| `tickets.createdInPeriod` / `resolvedInPeriod` | `createdAt ∈ [from,to)` / `resolvedAt ≠ null ∈ [from,to)` — never `updatedAt` |
+| `customers.*` | live customers; `status` is the real vocabulary `active`/`blocked` |
+| `conversations.*` | conversations whose parent ticket is live and same-workspace (bounded `$lookup`); there is no conversation status, so `closed` = parent RESOLVED/CLOSED |
+| `escalations.*` | real escalation statuses; `active` = PENDING/ASSIGNED/ACCEPTED |
+| `knowledgeBase.*` | article `status` groups; ARCHIVED is a first-class status, not a soft delete |
+| `ai.requests/answered/abstained/failed` | `audit_logs` rows with `resourceType: 'agent_response'`; failed = `agent.question_failed`; one row per ask, so a provider retry is never an extra answer |
+| `ai.citationBackedAnswers` | ANSWERED asks with `metadata.citationsCount > 0` |
+| `ai.aiEscalations` / `humanHandoffs` | escalations created in window with `initiatedBy.actorType: 'AI_AGENT'`; manual STAFF escalations excluded from the AI count (they are counted separately as escalation events) |
+| `performance.backlog.*` | live OPEN/IN_PROGRESS/WAITING_FOR_CUSTOMER tickets, their priority mix and the `agentId: null` subset |
+| `performance.resolutionTime` | `resolvedAt − createdAt` for real stamps inside the window; unresolved, null-stamp and negative durations excluded; median is MongoDB 7 `$percentile` (approximate) |
+| `performance.firstStaffReply` | conversation `createdAt` → FIRST `PUBLIC` `AGENT` message; INTERNAL notes are excluded in the lookup, only first replies landing in the window count, negative durations excluded |
+| `performance.escalationFrequency` | escalations created / tickets created (4 dp), `null` when no tickets — a ratio, not a percentage |
+| `performance.conversationVolume` | conversations created in window and message counts by visibility in window |
+| `performance.customerFirstResponse` | `{ available: false, reason }` — no customer-sender messages exist before customer-portal auth, so this is reported unavailable instead of fabricated |
+| CSV report | live tickets CREATED in the window, capped at 5,000 rows: number, status, priority, created_at, resolved_at, resolution_minutes, assigned |
+
+**Honest limitations (also returned/encoded in code comments):**
+
+- **UTC only.** `workspace.settings.timezone` is a free-form ≤64-char string,
+  not a validated IANA zone, so it is deliberately not used for bucketing.
+- **No cross-collection snapshot.** This deployment has no multi-document
+  transactions: one response is a set of independent aggregation reads, so two
+  metrics can reflect instants milliseconds apart.
+- **Aggregations bypass Mongoose pre-query hooks**, so every pipeline composes
+  `deletedAt: null` (and parent-ticket liveness) explicitly rather than
+  inheriting it.
+- **AI metrics are usage of the audit trail, not live provider telemetry.**
+  `aiProviderConfigured` reports `AI_PROVIDER !== 'none'` (configuration),
+  not proof of provider calls; prompts/answers are never read or returned.
+- No scheduled/emailed reports, no precomputed rollups, no export beyond the
+  bounded ticket CSV, and no timezone selection.
+
+**Export safety.** `Content-Type: text/csv`, `Content-Disposition:
+attachment`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`; the
+filename is sanitized. Every cell passes `csvCell`, which quotes delimiters
+and prefixes `= + - @ TAB CR` with `'` (formula-injection defence). The report
+is machine fields only — no subject, description, customer identity or
+resolution note can reach the file.
+
+**Performance & indexes.** Counts are `$group`/`$facet` over the workspace
+slice; the only `$lookup`s verify the parent ticket and are project-bounded
+(no `$unwind` fan-out, so nothing is double-counted). Response size is fixed
+by shape and the export cap. Three indexes were added for the new range shapes
+(see `docs/data-model.md`): tickets `{ workspaceId, resolvedAt }`, messages
+`{ workspaceId, createdAt: -1 }`, audit_logs
+`{ workspaceId, resourceType, createdAt: -1 }`.
+
+**Verification** — `npm run verify:analytics` (77 checks: RBAC/concealment,
+overview counts, archived exclusion, presets/custom windows and rejects,
+trends and bucket alignment, resolution-duration exclusions, first-reply
+INTERNAL exclusion, unavailable customer response, audit-derived AI metrics,
+tenant isolation, empty-workspace zeros, CSV headers/fields/escaping/bounds).
+
 ## Authentication (implemented)
 
 Short-lived **access JWTs** + long-lived **opaque rotating refresh tokens**:

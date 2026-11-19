@@ -161,6 +161,7 @@ All tenant-owned indexes lead with `workspaceId` (shared-pool tenancy).
 | tickets            | `{ workspaceId: 1, customerId: 1, createdAt: -1 }` | "All tickets for this customer" detail page |
 | tickets            | `{ workspaceId: 1, agentId: 1, updatedAt: -1 }`    | Agent work queue |
 | tickets            | `{ workspaceId: 1, createdAt: -1 }` / `{ workspaceId: 1, updatedAt: -1 }` | Date-range filters and newest/updated sort fallbacks |
+| tickets            | `{ workspaceId: 1, resolvedAt: 1 }`               | Prompt 18 resolution analytics: resolved-in-window counts and `resolvedAt − createdAt` durations without scanning the tenant's whole ticket set |
 | kb_categories      | `{ workspaceId, slug: 1 }` unique        | Per-tenant category name/slug uniqueness (the duplicate-409 law) |
 | kb_categories      | `{ workspaceId, parentId, displayOrder: 1, name: 1 }` | Tree reads: sibling order under a parent, ancestor-chain walk |
 | kb_articles        | `{ workspaceId, slug }` unique           | Per-tenant article URL uniqueness (the duplicate-409 law) |
@@ -183,9 +184,11 @@ All tenant-owned indexes lead with `workspaceId` (shared-pool tenancy).
 | conversations      | `{ workspaceId: 1, updatedAt: -1 }`            | Prompt 17 workspace-wide conversation search: subject matches ordered by recent activity, inside one tenant slice |
 | messages           | `{ workspaceId: 1, conversationId: 1, createdAt: 1 }` | Chronological thread reads (pagination sorts `{ createdAt: 1, _id: 1 }` for a stable per-millisecond order) |
 | messages           | `{ workspaceId: 1, ticketId: 1, createdAt: -1 }` | "Everything sent about this ticket" (ticket-scoped search/export) — cheap because `ticketId` is denormalized server-side |
+| messages           | `{ workspaceId: 1, createdAt: -1 }`                | Prompt 18 message-volume analytics: visibility counts over a workspace time window |
 | audit_logs         | `{ workspaceId: 1, createdAt: -1 }`                | Workspace activity feed, retention scans |
 | audit_logs         | `{ workspaceId: 1, resourceType: 1, resourceId: 1 }` | Per-resource history drill-down |
 | audit_logs         | `{ workspaceId: 1, actorId: 1, createdAt: -1 }`    | "What did this actor do" |
+| audit_logs         | `{ workspaceId: 1, resourceType: 1, createdAt: -1 }` | Prompt 18 AI analytics: one resource type (`agent_response`) over a time window. Indexes are write-cost on this immutable trail, so only this one new shape was added |
 | escalations        | `{ workspaceId, conversationId: 1 }` unique, partial (status ∈ PENDING/ASSIGNED/ACCEPTED) | The one-active-handoff-per-conversation LAW — DB-enforced; the race-safe create re-uses the winner on duplicate-key |
 | escalations        | `{ workspaceId, status, priorityRank: -1, createdAt: -1 }` | Escalation queue board: status filter, urgency-weighted order |
 | escalations        | `{ workspaceId, eligibleAssigneeId, updatedAt: -1 }` | Assigned work lists ("handoffs assigned to agent X") |
@@ -229,6 +232,27 @@ escalations `{ workspaceId, ticketId, createdAt }` and
 `{ workspaceId, conversationId, createdAt }`. No index was removed and none
 was added speculatively; there is no text index, Atlas Search index or
 Elasticsearch cluster in this deployment.
+
+### Analytics-supporting indexes (Prompt 18)
+
+Analytics reads are `$match` on the workspace slice plus a date bound, then
+`$group`/`$facet` aggregation (see `docs/architecture.md`). Three
+workspace-leading indexes were added for exactly those shapes and nothing
+else was added speculatively:
+
+- `tickets` `{ workspaceId, resolvedAt: 1 }` — resolved-in-window counts and
+  the duration `$subtract`, which otherwise degrade to a tenant-wide scan as
+  ticket history grows.
+- `messages` `{ workspaceId, createdAt: -1 }` — message-volume counts by
+  visibility over a window (the existing index is conversation-lead).
+- `audit_logs` `{ workspaceId, resourceType, createdAt: -1 }` — AI analytics
+  range-scans one resource type; the existing resource index also carries
+  `resourceId`, so it cannot order that window.
+
+Aggregations bypass Mongoose query hooks, so analytics pipelines compose
+`deletedAt: null` (and parent-ticket liveness for conversations) explicitly
+rather than relying on model defaults. No precomputed analytics collection,
+rollup job or TTL index was introduced.
 
 ## Tenant isolation
 

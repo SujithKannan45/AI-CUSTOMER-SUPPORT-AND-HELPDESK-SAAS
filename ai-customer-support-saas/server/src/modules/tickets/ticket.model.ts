@@ -226,6 +226,11 @@ ticketSchema.index(
 );
 ticketSchema.index({ workspaceId: 1, createdAt: -1 }, { name: 'idx_tickets_by_created' });
 ticketSchema.index({ workspaceId: 1, updatedAt: -1 }, { name: 'idx_tickets_by_updated' });
+// Prompt 18: resolution-time statistics and the resolution trend filter EXACTLY
+// on `resolvedAt` inside one workspace. No existing index has this prefix, so
+// the analytics scans would otherwise fall back to scanning every live ticket
+// of the tenant.
+ticketSchema.index({ workspaceId: 1, resolvedAt: 1 }, { name: 'idx_tickets_by_resolved' });
 
 export const TicketModel = model<TicketDocument, Model<TicketDocument>>(
   'Ticket',

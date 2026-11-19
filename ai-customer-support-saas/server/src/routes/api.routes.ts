@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { env } from '../config/env.config.js';
 import { agentRouter } from '../modules/agent/agent.routes.js';
+import { analyticsRouter } from '../modules/analytics/analytics.routes.js';
 import { authRouter } from '../modules/auth/auth.routes.js';
 import {
   conversationRouter,
@@ -77,6 +78,12 @@ apiRouter.use('/workspaces/:workspaceId/notifications', notificationRouter);
 // `/conversations/:id/messages?search=` where the visibility law can be
 // enforced inside the query.
 apiRouter.use('/workspaces/:workspaceId/search', searchRouter);
+// Analytics & reporting (Prompt 18) under the SAME tenant context:
+// `/analytics/overview|tickets|performance|ai` plus the bounded
+// `/analytics/reports/tickets.csv` export. All reads are workspace-scoped
+// aggregations over existing collections; `analytics.view` (owner/admin) is
+// the existing permission gate — no new permission is introduced.
+apiRouter.use('/workspaces/:workspaceId/analytics', analyticsRouter);
 apiRouter.use('/public/knowledge-base', publicKnowledgeBaseRouter);
 // Customer routes nest under the workspace tenant context:
 // `/api/v1/workspaces/:workspaceId/customers` carries the parent's
