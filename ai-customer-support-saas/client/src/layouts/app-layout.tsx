@@ -2,7 +2,6 @@ import { useEffect, type JSX } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { cn } from '@/utils/cn.util';
 import { useUiStore } from '@/store/ui.store';
-import { useWorkspaceBootstrap } from '@/features/workspace/use-workspace';
 import { Header } from './components/header';
 import { Sidebar } from './components/sidebar';
 
@@ -17,7 +16,6 @@ export function AppLayout(): JSX.Element {
   const isSidebarOpen = useUiStore((state) => state.sidebarOpen);
   const closeSidebar = useUiStore((state) => state.closeSidebar);
   const location = useLocation();
-  useWorkspaceBootstrap();
 
   useEffect(() => {
     closeSidebar();

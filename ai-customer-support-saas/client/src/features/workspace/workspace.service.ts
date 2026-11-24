@@ -20,4 +20,13 @@ export const workspaceService = {
   get(workspaceId: string): Promise<WorkspaceDetailPayload> {
     return httpClient.get<WorkspaceDetailPayload>(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}`);
   },
+
+  /**
+   * POST /api/v1/workspaces — the authenticated caller becomes the owner.
+   * The owner id is never sent by the client; the server takes it from the
+   * access token.
+   */
+  create(input: { name: string }): Promise<WorkspaceDetailPayload> {
+    return httpClient.post<WorkspaceDetailPayload>('/api/v1/workspaces', input);
+  },
 };

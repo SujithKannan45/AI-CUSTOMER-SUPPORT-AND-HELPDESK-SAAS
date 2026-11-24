@@ -1,21 +1,18 @@
-import { useState, type JSX } from 'react';
-import { useNavigate } from 'react-router-dom';
+import type { JSX } from 'react';
 import { LogOut } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Dropdown } from '@/components/ui/dropdown';
 import { useSessionStore } from '@/features/auth/auth.store';
+import { useSignOut } from '@/features/auth/use-sign-out';
 import { useActiveWorkspace } from '@/features/workspace/use-workspace';
 import { ROLE_LABELS } from '@/features/workspace/types';
-import { ROUTES } from '@/app/routes/route-paths';
 
 /** Signed-in identity + account actions (sign-out is fully wired). */
 export function UserMenu(): JSX.Element | null {
   const user = useSessionStore((state) => state.user);
-  const signOut = useSessionStore((state) => state.signOut);
   const { role } = useActiveWorkspace();
-  const navigate = useNavigate();
-  const [isSigningOut, setIsSigningOut] = useState(false);
+  const { signOut, isSigningOut } = useSignOut();
 
   if (user === null) return null;
 
@@ -48,11 +45,7 @@ export function UserMenu(): JSX.Element | null {
           tone: 'danger',
           disabled: isSigningOut,
           onSelect: () => {
-            setIsSigningOut(true);
-            void signOut().finally(() => {
-              setIsSigningOut(false);
-              void navigate(ROUTES.login, { replace: true });
-            });
+            void signOut();
           },
         },
       ]}

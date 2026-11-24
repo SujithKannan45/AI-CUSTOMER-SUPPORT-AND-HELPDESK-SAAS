@@ -18,7 +18,7 @@ export const authService = {
     return payload.user;
   },
 
-  /** POST /api/v1/auth/login — Prompt 20 owns the form that calls this. */
+  /** POST /api/v1/auth/login — credentials → user + access token (refresh cookie set). */
   login(input: { email: string; password: string }): Promise<AuthSessionPayload> {
     return apiRequest<AuthSessionPayload>('/api/v1/auth/login', {
       method: 'POST',
@@ -36,6 +36,30 @@ export const authService = {
   async logout(): Promise<void> {
     await apiRequest<{ loggedOut: boolean }>('/api/v1/auth/logout', {
       method: 'POST',
+      skipAuthRefresh: true,
+    });
+  },
+
+  /**
+   * POST /api/v1/auth/forgot-password — asks the server to email a one-time
+   * reset link. Responds identically for every address (no enumeration).
+   */
+  async requestPasswordReset(email: string): Promise<{ queued: boolean }> {
+    return apiRequest<{ queued: boolean }>('/api/v1/auth/forgot-password', {
+      method: 'POST',
+      body: { email },
+      skipAuthRefresh: true,
+    });
+  },
+
+  /**
+   * POST /api/v1/auth/reset-password — consumes the emailed token and sets the
+   * new password. The server revokes all live sessions on success.
+   */
+  async resetPassword(input: { email: string; token: string; password: string }): Promise<{ passwordReset: boolean }> {
+    return apiRequest<{ passwordReset: boolean }>('/api/v1/auth/reset-password', {
+      method: 'POST',
+      body: input,
       skipAuthRefresh: true,
     });
   },

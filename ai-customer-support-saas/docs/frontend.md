@@ -1,8 +1,10 @@
-# Frontend architecture & design system (Prompt 19)
+# Frontend architecture, design system & auth UI (Prompts 19–20)
 
 This document describes the React application as it exists today. It is a
 maintainer's guide, not a roadmap: every path, token and behaviour named here is
-implemented in `client/`.
+implemented in `client/`. Prompt 20 added the real sign-in, password-recovery,
+session, sign-out and workspace-selection surfaces on top of the Prompt 19
+foundation.
 
 The frontend is a **React 19 + TypeScript (strict) SPA** built with Vite,
 routed by React Router 7's data router, styled with Tailwind CSS 4 design
@@ -44,7 +46,7 @@ client/
     │   ├── App.tsx             # ErrorBoundary → providers → router
     │   ├── router.tsx          # route table, lazy page splitting
     │   ├── providers/          # app-providers, theme.provider, toast.provider
-    │   ├── guards/             # require-auth (session bootstrap + redirect)
+    │   ├── guards/             # require-auth (session), require-workspace (tenant)
     │   └── routes/             # route-paths (single source for path strings)
     ├── components/
     │   ├── ui/                 # design system (see §4)
@@ -53,13 +55,14 @@ client/
     │   └── feedback/           # states, spinner, error-boundary
     ├── config/env.config.ts    # the only reader of import.meta.env
     ├── features/
-    │   ├── auth/               # types, service, session store
-    │   ├── workspace/          # types, service, store, hooks
+    │   ├── auth/               # session store, validation, errors, sign-out hook,
+    │   │                       # sign-in/forgot-password/auth-shell components
+    │   ├── workspace/          # types, service, store, hooks, create dialog
     │   ├── dashboard/          # dashboard-only components
     │   └── notifications/      # unread-count service
     ├── hooks/                  # use-debounce, use-media-query, use-theme, use-toast
     ├── layouts/                # app-layout + sidebar/header/workspace-switcher/…
-    ├── pages/                  # dashboard, login placeholder, not found
+    ├── pages/                  # login, reset-password, workspace picker, dashboard, 404
     ├── services/               # http-client, auth-token store, health
     ├── store/                  # ui.store (sidebar + theme preference)
     ├── styles/global.css       # design tokens, base layer, z-index utilities
@@ -147,6 +150,7 @@ need the DOM node, and accept `className` that is merged (not replaced) through
 | `Checkbox`, `Switch` | Associated labels; `Switch` is `role="switch"` with `aria-checked` and Space/Enter support. |
 | `Field` + `FieldLabel`, `FieldDescription`, `FieldError` | Label/description/error composition. Use `fieldDescribedBy(id, {…})` from `field-ids.ts` for `aria-describedby`. |
 | `Badge` | `tone` (neutral/brand/success/warning/danger/info) × `appearance` (soft/solid/outline), optional `dot`. Always carries text, so colour is never the only signal. |
+| `Alert` | Inline form-level feedback: `tone` (error/success/warning/info), optional title, `role="alert"` for errors and `role="status"` otherwise. |
 | `Avatar` | Initials fallback, `onError` fallback, sizes xs–lg, decorative unless `label` is given. |
 | `Tooltip` | Hover + keyboard focus, Escape dismisses, linked with `aria-describedby`. Short hints only. |
 | `Dropdown` | WAI-ARIA menu button: Arrow/Home/End navigation, Escape restores focus, outside click closes, `header` slot for identity. |
@@ -192,8 +196,13 @@ No form library and no client validation library was added. The pattern:
 ```
 
 - The **server is the validation authority** (Zod schemas + 422 field details).
-  `HttpApiError.isValidationError` and `error.details` carry them; Prompt 20+
-  maps `details` onto `Field` errors rather than duplicating rules.
+  `HttpApiError.isValidationError` and `error.details` carry them.
+  `utils/api-error.util.ts#firstFieldError` reads one field's message (used by
+  workspace creation).
+- Auth forms additionally mirror only the rules needed to fail fast and focus
+  the right control (`features/auth/validation.ts`): email format, required
+  password, and the documented reset-password policy. The mirrors must stay in
+  step with `server/src/modules/auth/auth.validation.ts`.
 - Required fields are marked visually (`*`) and announced (“(required)”).
 - Submit buttons use `Button isLoading` so double submits are impossible while
   a request is in flight.
@@ -232,9 +241,11 @@ container.
 
 | Path | Access | Notes |
 | --- | --- | --- |
-| `/login` | public | placeholder page; Prompt 20 owns the real screens |
-| `/`, `/dashboard` | protected | `RequireAuth` → `AppLayout` → lazy `DashboardPage` |
-| `*` | protected | not-found page inside the shell |
+| `/login` | public | real sign-in form; authenticated visitors are redirected away |
+| `/reset-password?email&token` | public | password-reset form consuming the emailed token |
+| `/workspaces/select` | session only | workspace picker / empty-workspace state + creation |
+| `/`, `/dashboard` | session + workspace | `RequireAuth` → `RequireWorkspace` → `AppLayout` → lazy `DashboardPage` |
+| `*` | session + workspace | not-found page inside the shell |
 
 `RequireAuth` (`app/guards/require-auth.tsx`):
 
@@ -247,6 +258,22 @@ container.
 5. Drops the session and redirects when a later request reports the session is
    gone (`subscribeToAuthFailure`).
 
+`RequireWorkspace` (`app/guards/require-workspace.tsx`) runs the workspace load
+through `useWorkspaceBootstrap()` and adds a fourth state beyond auth:
+
+- loading → status screen; load error → retryable error (never misreported as
+  “no workspaces”);
+- ready with no active membership → redirect to `/workspaces/select`;
+- ready with an active workspace → render the shell.
+
+`/workspaces/select` deliberately sits **outside** the workspace gate so an
+account with zero memberships still has a real, protected destination.
+
+Return-to is stored as router state (`state.from`) by `RequireAuth` and read by
+`features/auth/redirect.ts`. Only same-origin absolute paths are accepted and
+`/login` itself is rejected, so history state cannot be used as an open
+redirect.
+
 To add a route in a later prompt: add the path to `route-paths.ts`, add the
 page under `pages/` (or a feature’s pages), insert a child route inside the
 `AppLayout` subtree with `lazy()`, then flip the matching `nav-items.ts`
@@ -254,7 +281,145 @@ entry to `enabled: true`.
 
 ---
 
-## 8. API client
+## 8. Authentication UI (Prompt 20)
+
+### Routes and components
+
+| Route | Page | Feature components |
+| --- | --- | --- |
+| `/login` | `pages/login.page.tsx` | `AuthShell`, `SignInForm`, `ForgotPasswordDialog`, `PasswordInput` |
+| `/reset-password` | `pages/reset-password.page.tsx` | `AuthShell`, `PasswordInput` |
+| — | — | `useSignOut` (shared by user menu and picker) |
+
+`AuthShell` is the balanced two-column public layout: product identity and
+three capability statements on the left (desktop), form column on the right;
+single column with a compact brand header on mobile. No gradients, no
+decorative animation, theme toggle in the form column.
+
+### Sign-in flow
+
+1. The page calls `session.bootstrap()` on mount. While it resolves, the panel
+   shows “Checking your session…” instead of a form that could race it.
+2. An already-authenticated visitor is redirected to `state.from` or
+   `/dashboard` — the login screen is never shown unnecessarily.
+3. `SignInForm` trims the email, never trims/rewrites the password, and blocks
+   the request when either field is missing or the email is malformed, focusing
+   the first invalid field.
+4. `POST /api/v1/auth/login` returns `{ user, tokens }`; the access token goes
+   to the in-memory token store via `startSession`, never to storage.
+5. The form routes to `state.from` or `/dashboard`. `RequireWorkspace` then
+   loads the tenant list and sends an account with no active membership to
+   `/workspaces/select` — the picker decision lives in one place.
+6. A submit guard (ref + `isLoading`/disabled) prevents duplicate requests.
+
+### Validation and errors
+
+`features/auth/validation.ts` mirrors the login contract: required email with
+the same `EMAIL_PATTERN` as the server, ≤254 chars; required password ≤128
+chars. Passwords are sent unchanged.
+
+`features/auth/auth.errors.ts` maps failures to safe copy and never prints a
+response body, stack, URL or token:
+
+| Failure | Copy |
+| --- | --- |
+| 401 | “Email or password is incorrect.” (uniform, matches server anti-enumeration) |
+| 403 | suspended / invitation-not-accepted / no access |
+| 422 | “Check your email and password, then try again.” |
+| 429 | too many attempts, wait a few minutes |
+| 5xx | service temporarily unavailable |
+| status 0 | the client's own network/timeout message |
+
+Field errors are wired with `Field` + `fieldDescribedBy`, so `aria-describedby`
+links the control to its error and the error is an `alert`. The form-level
+failure uses `<Alert tone="error">` (`role="alert"`).
+
+### Password recovery
+
+The backend really implements recovery, so the UI does too:
+
+- `POST /api/v1/auth/forgot-password` via a dialog on the login page. The
+  confirmation is deliberately conditional (“If an account exists for …”), the
+  same anti-enumeration shape the server returns.
+- `POST /api/v1/auth/reset-password` on `/reset-password?email&token`. The page
+  first validates the email and the 64-hex token shape, then applies the
+  server's password policy (8–128 chars, letter + digit) and confirmation
+  match. On success it returns to `/login` with a one-time success notice.
+- Registration and email verification screens are **not** part of Prompt 20
+  (see §15).
+
+### Session lifecycle
+
+`SessionStatus` is one of `idle | loading | authenticated | anonymous | error`:
+
+- `bootstrap()` skips while loading/authenticated, unblocks the refresh guard,
+  and calls `GET /auth/me` (which transparently performs the single-flight
+  `POST /auth/refresh` once on 401).
+- 401 → `anonymous` (normal logged-out path); token cleared.
+- transport/5xx → `error` with a retry action; the user is **not** signed out.
+- `startSession` sets the in-memory token and `authenticated`.
+- `subscribeToAuthFailure` (fired when a later request loses its session) calls
+  `reset()` so protected UI disappears immediately.
+
+There is exactly one session store; the guard and login page both read it.
+
+### Sign-out
+
+`useSignOut()`:
+
+1. calls `POST /api/v1/auth/logout` (which revokes the refresh token and clears
+   the HttpOnly cookie);
+2. always clears the access token and session state, even when the request
+   fails; the app-level `SessionSyncProvider` clears the workspace list and the
+   persisted workspace selection as soon as the status becomes `anonymous`
+   (the auth and workspace features do not import each other's stores);
+3. returns `{ remoteRevoked }`; on failure a warning toast says the session
+   ended on this device but server-side revocation could not be confirmed —
+   the UI never claims the server session was invalidated;
+4. navigates to `/login` with `replace`.
+
+## 9. Workspace UI (Prompt 20)
+
+### Workspace picker (`/workspaces/select`)
+
+A protected, standalone screen (brand, user name/email, theme toggle, sign out)
+with explicit states: skeleton while loading; retryable error; empty state with
+“Create workspace”; and the membership list. Each row shows only real API data:
+workspace name, slug, the caller's role and membership join date, with a
+“Current” marker. Selecting a row calls `setActive(id)` and navigates to the
+dashboard.
+
+### Workspace gate and switcher
+
+- `RequireWorkspace` ensures the shell never renders with an unresolved tenant.
+- `WorkspaceSwitcher` lists exactly the memberships returned by the API, shows
+  the current role, and adds a real “Create workspace…” action. Switching
+  updates `activeWorkspaceId` and persists it as a convenience preference.
+- There is no tenant data cache yet; every future tenant-scoped query must key
+  its fetch on `activeWorkspaceId` (and reset on change) so a previous
+  workspace's rows can never be shown after a switch. Today the dashboard
+  derives everything from the store, so the header, role and workspace card
+  update atomically.
+- `setActive` ignores ids that are not in the caller's own list; the client
+  cannot grant itself access, and the server re-checks membership on every
+  request regardless.
+
+### Creation
+
+`POST /api/v1/workspaces` is supported by the backend and used by the real
+dialog (name 3–100 chars, sent trimmed). The server makes the authenticated
+caller the owner; the client never sends an owner id. The new workspace is
+added to the list and made active **only after** the response arrives; 409
+(name/slug already exists), 422 field details, 429 and 5xx have dedicated copy.
+
+### Invitations / member management
+
+The backend currently exposes only create/list/detail/update workspace routes —
+there are no invite or member-management endpoints. No invitation UI, fake
+member records or simulated emails were created. That capability needs a
+backend phase first.
+
+## 10. API client
 
 `services/http-client.service.ts` is the only module that calls `fetch`.
 
@@ -286,13 +451,13 @@ thin typed wrappers; components never build URLs.
 
 ---
 
-## 9. State management
+## 11. State management
 
 | State | Where | Why |
 | --- | --- | --- |
 | Sidebar open, theme preference | `store/ui.store.ts` (Zustand, theme persisted) | global UI, tiny, changes rarely |
-| Session: status, user, bootstrap/signOut | `features/auth/auth.store.ts` (Zustand) | needed by the guard, header and every page |
-| Workspace list + active workspace | `features/workspace/workspace.store.ts` (Zustand) | one fetch per session, read by the shell |
+| Session: status, user, bootstrap/startSession/signOut | `features/auth/auth.store.ts` (Zustand) | needed by the guard, header and every page |
+| Workspace list, active workspace, create | `features/workspace/workspace.store.ts` (Zustand) | one fetch per session, read by the shell |
 | Toasts | React state in `ToastProvider` | transient, owned by one subtree |
 | Form input, open/closed UI, fetched page data | local component state | the default; do not globalise it |
 
@@ -304,7 +469,7 @@ component API does not change.
 
 ---
 
-## 10. Responsive & accessibility conventions
+## 12. Responsive & accessibility conventions
 
 - Mobile-first utility classes; breakpoints used: `sm`, `md`, `lg`.
 - Every interactive control is a real `button`/`a`/`input` with an accessible
@@ -321,7 +486,7 @@ component API does not change.
 
 ---
 
-## 11. Tests
+## 13. Tests
 
 ```bash
 npm run test --workspace client      # vitest run
@@ -331,7 +496,7 @@ npm run test:watch --workspace client
 Configuration: `client/vitest.config.ts` (jsdom, React plugin, `@` alias,
 `src/test/setup.ts`). Tests live next to the code as `*.test.ts(x)`.
 
-Covered today (42 tests, 10 files):
+Covered today (91 tests, 22 files):
 
 - `Button` — label, variants, loading/disabled, click, keyboard activation.
 - `Modal` — portal/ARIA, focus in, Escape, close button, Tab containment.
@@ -344,14 +509,32 @@ Covered today (42 tests, 10 files):
   refresh-and-retry, single-flight refresh, no refresh loop, opt-out calls,
   network error mapping.
 - `RequireAuth` — authenticated render, redirect, retryable error.
+- `RequireWorkspace` — shell render, no-workspace redirect, retryable load error.
+- `SessionSyncProvider` — clears workspace context when the session ends and
+  leaves it untouched for authenticated profile updates.
+- Auth validation — required fields, email format/trim, password not trimmed,
+  reset-password policy and confirmation.
+- Session store — bootstrap success/401/network, in-memory token only, sign-out
+  clearing session + workspace with honest `remoteRevoked`.
+- `SignInForm` — labels, required/format validation, password visibility,
+  successful login (with return-to/workspace routing), invalid credentials,
+  network failure, duplicate-submit guard, no token/password in localStorage.
+- `LoginPage` — anonymous form, restored-session redirect, `state.from`.
+- `ForgotPasswordDialog` / `ResetPasswordPage` — validation, success copy,
+  token contract, failure copy, initial focus.
+- Workspace store — stored-selection restore/fallback, error, foreign-id
+  no-op, creation activation, reset.
+- Workspace picker / create dialog / `UserMenu` — loading, empty, error, list,
+  selection, creation validation/conflict, sign-out success and failure.
 - Theme utilities — resolution and DOM application.
 
-Not covered: layout rendering, browser-level visual behaviour, and the
+Not covered: pixel-level visual regressions, backend integration tests of the
+logged-in flows (verified manually in the browser, see below), and the
 dashboard’s live API status card (needs a running server).
 
 ---
 
-## 12. Extending the frontend (Prompts 20–25)
+## 14. Extending the frontend (Prompts 21–25)
 
 1. **Add the route** in `route-paths.ts`, the page in `features/<domain>/pages/`
    and a child route under `AppLayout` (`lazy()`), then enable the nav entry.
@@ -370,10 +553,22 @@ dashboard’s live API status card (needs a running server).
 
 ---
 
-## 13. Known limitations
+## 15. Known limitations
 
-- **Sign-in UI is not implemented** (Prompt 20). `/login` is an honest
-  placeholder; the guard, services and token lifecycle around it are real.
+- **Signup and email-verification screens are not implemented.** The backend
+  supports `POST /auth/register` and `POST /auth/verify-email`; no UI was built
+  because Prompt 20 scopes authentication UI to sign-in, session, sign-out and
+  workspace access. The verification link points at `/verify-email`, which does
+  not exist yet.
+- **Workspace invitations/member management are backend-limited** — no invite
+  endpoints exist, so no UI exists (see §9).
+- **Password-reset completion was not verified end-to-end in a browser**
+  because the development email provider keeps the one-time token in an
+  in-process outbox with no HTTP access. The request endpoint, malformed-link
+  state and real invalid/expired-token response were verified; a real inbox is
+  needed to complete a reset.
+- **Workspace settings/rename UI is not included** (the `PATCH /workspaces/:id`
+  backend route exists; settings screens belong to a later prompt).
 - **No route exists yet for tickets/conversations/customers/KB/analytics/
   settings**; their nav entries are `aria-disabled` so nothing 404s.
 - **Notification bell is read-only** — it shows the caller’s real unread count

@@ -1,48 +1,57 @@
-import type { JSX } from 'react';
-import { Headset, ShieldCheck } from 'lucide-react';
-import { Card, CardBody } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import { clientEnv } from '@/config/env.config';
+import { useEffect, useRef, type JSX } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
+import { LoadingState } from '@/components/feedback/states';
+import { ThemeToggle } from '@/layouts/components/theme-toggle';
+import { AuthShell } from '@/features/auth/components/auth-shell';
+import { SignInForm } from '@/features/auth/components/sign-in-form';
+import { useSessionStore } from '@/features/auth/auth.store';
+import { postLoginDestination, readNotice } from '@/features/auth/redirect';
 
 /**
- * Sign-in route placeholder.
+ * Public sign-in route.
  *
- * Prompt 20 owns the authentication screens; this page exists so the route
- * table, the guard redirect and the unauthenticated layout are real and
- * verifiable today. It deliberately contains no form, no demo credentials and
- * no way to bypass the guard.
+ * - Restores the session first: a signed-in visitor is sent straight to the
+ *   route they were trying to reach (never shown the form again).
+ * - A session that cannot be resolved because the API is down still shows the
+ *   form; submitting it surfaces a concrete network error.
+ * - While restoring, the panel shows a status message instead of a form that
+ *   could race the session.
  */
 export function LoginPage(): JSX.Element {
+  const status = useSessionStore((state) => state.status);
+  const bootstrap = useSessionStore((state) => state.bootstrap);
+  const location = useLocation();
+  const notice = readNotice(location.state);
+  const hasSubmitted = useRef(false);
+
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
+
+  // A session restored on arrival redirects here. A login just submitted is
+  // handled by the form itself (it knows whether a workspace exists).
+  if (status === 'authenticated' && !hasSubmitted.current) {
+    return <Navigate to={postLoginDestination(location.state)} replace />;
+  }
+
+  const isResolving = status === 'idle' || status === 'loading';
+
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-6 px-4 py-10">
-      <div className="flex items-center gap-2.5">
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <Headset aria-hidden className="h-4 w-4" />
-        </span>
-        <span className="text-sm font-semibold tracking-tight text-foreground">{clientEnv.appName}</span>
-      </div>
-
-      <Card className="w-full max-w-md">
-        <CardBody className="space-y-4">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight text-foreground">Sign in</h1>
-            <p className="mt-1 text-sm leading-6 text-muted">
-              The sign-in experience ships with the authentication prompt. The API already supports it
-              (`POST /api/v1/auth/login` → access token in JSON, refresh token in an HttpOnly cookie).
-            </p>
-          </div>
-
-          <Separator />
-
-          <div className="flex items-start gap-2.5 rounded-lg bg-surface-subtle p-3">
-            <ShieldCheck aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-            <p className="text-xs leading-5 text-muted">
-              Protected routes are served only after the session guard resolves a real session from the
-              refresh cookie. There are no demo sessions and no client-side bypass.
-            </p>
-          </div>
-        </CardBody>
-      </Card>
-    </div>
+    <AuthShell
+      title="Sign in"
+      description="Use your work account to reach your support workspace."
+      actions={<ThemeToggle />}
+    >
+      {isResolving ? (
+        <LoadingState label="Checking your session…" />
+      ) : (
+        <SignInForm
+          notice={notice}
+          onAuthStart={() => {
+            hasSubmitted.current = true;
+          }}
+        />
+      )}
+    </AuthShell>
   );
 }

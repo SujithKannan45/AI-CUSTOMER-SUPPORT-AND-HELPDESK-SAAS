@@ -981,9 +981,16 @@ Full detail lives in [`docs/frontend.md`](frontend.md); the invariants:
 - **State**: Zustand for UI state (sidebar, theme), session and active
   workspace; everything else is local. Server data flows through typed
   services, never through components building URLs.
-- **Routing**: React Router 7 data router; `/login` is public, everything else
-  is wrapped by `RequireAuth` (silent refresh-cookie bootstrap → `/auth/me`)
-  inside `AppLayout`, with lazy page chunks.
+- **Routing**: React Router 7 data router. Public: `/login`, `/reset-password`.
+  `/workspaces/select` requires a session only; the application shell is
+  wrapped by `RequireAuth` (silent refresh-cookie bootstrap → `/auth/me`) then
+  `RequireWorkspace` (loads `GET /workspaces`, redirects accounts with no active
+  membership to the picker), with lazy page chunks.
+- **Auth & tenancy UI**: a real sign-in form (server-authorized credentials,
+  trimmed email, untouched password, safe error copy), forgot/reset-password
+  flows against the existing endpoints, honest sign-out (`remoteRevoked`),
+  workspace selection/creation only after server confirmation, and a workspace
+  switcher that never treats its selection as authorization.
 - **API client**: single `fetch` owner with bearer injection, request timeout,
   envelope unwrapping, one single-flight refresh-and-retry on 401, and a
   refresh-block after failure (no loops). Access tokens stay in memory; the

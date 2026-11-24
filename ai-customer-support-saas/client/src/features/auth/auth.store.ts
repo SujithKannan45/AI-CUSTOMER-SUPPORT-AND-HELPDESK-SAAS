@@ -4,15 +4,20 @@ import { clearAccessToken, setAccessToken, unblockTokenRefresh } from '@/service
 import { authService } from './auth.service';
 import type { PublicUser, SessionStatus } from './types';
 
+export interface SignOutResult {
+  /** True only when the server confirmed the refresh token was revoked. */
+  remoteRevoked: boolean;
+}
+
 export interface SessionState {
   status: SessionStatus;
   user: PublicUser | null;
   error: string | null;
   /** Resolves the session once per app load (silent refresh cookie → /auth/me). */
   bootstrap: () => Promise<void>;
-  /** Called by the sign-in flow (Prompt 20) after a successful login. */
+  /** Starts the in-memory session after a successful login. */
   startSession: (payload: { user: PublicUser; accessToken: string }) => void;
-  signOut: () => Promise<void>;
+  signOut: () => Promise<SignOutResult>;
   /** Drops local session state (auth failure, sign-out, guard reset). */
   reset: () => void;
 }
@@ -63,14 +68,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   signOut: async () => {
+    let remoteRevoked = false;
     try {
       await authService.logout();
+      remoteRevoked = true;
     } catch {
-      // The local session must end even when the network call fails.
-    } finally {
-      clearAccessToken();
-      get().reset();
+      // Local state must still end; the caller decides how honest to be about
+      // server-side revocation (see useSignOut).
     }
+
+    clearAccessToken();
+    // Entering `anonymous` also clears tenant state through the app-level
+    // SessionSyncProvider, so no workspace selection survives the session.
+    get().reset();
+
+    return { remoteRevoked };
   },
 
   reset: () => {

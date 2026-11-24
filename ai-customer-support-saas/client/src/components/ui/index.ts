@@ -1,3 +1,4 @@
+export { Alert, type AlertProps, type AlertTone } from './alert';
 export { Avatar, type AvatarProps, type AvatarSize } from './avatar';
 export { Badge, type BadgeAppearance, type BadgeProps, type BadgeTone } from './badge';
 export { Button, ButtonLink, type ButtonLinkProps, type ButtonProps } from './button';

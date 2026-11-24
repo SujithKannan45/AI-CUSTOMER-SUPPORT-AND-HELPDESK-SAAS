@@ -3,8 +3,11 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { AppLayout } from '@/layouts/app-layout';
 import { LoadingState } from '@/components/feedback/states';
 import { RequireAuth } from '@/app/guards/require-auth';
+import { RequireWorkspace } from '@/app/guards/require-workspace';
 import { ROUTES } from '@/app/routes/route-paths';
 import { LoginPage } from '@/pages/login.page';
+import { ResetPasswordPage } from '@/pages/reset-password.page';
+import { WorkspacesSelectPage } from '@/pages/workspaces-select.page';
 import { NotFoundPage } from '@/pages/not-found.page';
 
 /** Route-level code splitting: the shell renders instantly, pages stream in. */
@@ -15,18 +18,31 @@ const DashboardPage = lazy(() =>
 /**
  * Route map.
  *
- * - `/login` is public (Prompt 20 fills it in).
- * - Everything else sits inside `RequireAuth` → `AppLayout`, so protected
- *   content is never rendered for an unauthenticated visitor.
+ * - Public: `/login` and `/reset-password` (the emailed token destination).
+ * - `/workspaces/select` requires a session but NOT a workspace — it is the
+ *   destination for accounts without an active membership.
+ * - Everything else sits inside `RequireAuth` → `RequireWorkspace` →
+ *   `AppLayout`, so neither protected content nor a tenant-less shell renders.
  * - Feature routes mount as `children` when their prompts land.
  */
 const router = createBrowserRouter([
   { path: ROUTES.login, element: <LoginPage /> },
+  { path: ROUTES.resetPassword, element: <ResetPasswordPage /> },
+  {
+    path: ROUTES.workspacesSelect,
+    element: (
+      <RequireAuth>
+        <WorkspacesSelectPage />
+      </RequireAuth>
+    ),
+  },
   {
     path: ROUTES.root,
     element: (
       <RequireAuth>
-        <AppLayout />
+        <RequireWorkspace>
+          <AppLayout />
+        </RequireWorkspace>
       </RequireAuth>
     ),
     children: [

@@ -9,6 +9,8 @@
 export const ROUTES = {
   root: '/',
   login: '/login',
+  resetPassword: '/reset-password',
+  workspacesSelect: '/workspaces/select',
   dashboard: '/dashboard',
 } as const;
 
