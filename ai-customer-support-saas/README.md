@@ -14,7 +14,7 @@ React application shell. Feature phases build on top of it (see
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | React 19, TypeScript, Vite, React Router 7, Tailwind CSS 4, Framer Motion, Zustand |
+| Frontend | React 19, TypeScript, Vite, React Router 7, Tailwind CSS 4, Framer Motion, Zustand, Vitest + Testing Library |
 | Backend | Node.js 22, Express 5, TypeScript (strict), Zod validation |
 | Database | MongoDB 7 via Mongoose 8 |
 | Real-time | Architecture prepared for Socket.IO (same-port HTTP server, typed events) |
@@ -28,17 +28,19 @@ React application shell. Feature phases build on top of it (see
 ai-customer-support-saas/
 ├── client/                 # React SPA
 │   └── src/
-│       ├── app/            # App root, router, cross-app components
-│       ├── components/     # ui/ (design-system) + feedback/ (states, boundaries)
-│       ├── features/       # Feature modules (auth, tickets, …) — populated per phase
-│       ├── hooks/          # Reusable React hooks
-│       ├── layouts/        # App shell (sidebar, header, responsive drawer)
+│       ├── app/            # Root, router, providers, auth guard, route paths
+│       ├── components/     # ui/ design system, common/, navigation/, feedback/
+│       ├── config/         # import.meta.env access (clientEnv)
+│       ├── features/       # auth, workspace, notifications, dashboard
+│       ├── hooks/          # Reusable React hooks (debounce, media, theme, toast)
+│       ├── layouts/        # App shell (sidebar, header, workspace switcher)
 │       ├── pages/          # Route-level pages
-│       ├── services/       # Typed API clients (one per backend module)
-│       ├── store/          # Zustand global state (UI state only)
-│       ├── styles/         # Tailwind v4 theme tokens
+│       ├── services/       # HTTP client, token store, typed API services
+│       ├── store/          # Zustand UI state (sidebar, theme preference)
+│       ├── styles/         # Tailwind v4 design tokens + themes
+│       ├── test/           # Vitest setup (jsdom, jest-dom, cleanup)
 │       ├── types/          # Shared API contracts
-│       └── utils/          # Pure helpers
+│       └── utils/          # Pure helpers (cn, storage, theme)
 ├── server/                 # REST API
 │   └── src/
 │       ├── config/         # Validated env config (Zod) — no process.env elsewhere
@@ -51,7 +53,7 @@ ai-customer-support-saas/
 │       ├── app.ts          # Express app factory
 │       └── server.ts       # HTTP listener + graceful shutdown
 ├── docker/                 # Dockerfiles + nginx
-├── docs/                   # architecture.md
+├── docs/                   # architecture.md, data-model.md, frontend.md
 ├── scripts/                # dev-db.ts (Docker-less Mongo) + verification drivers
 ├── docker-compose.yml      # Local MongoDB (Redis commented for the jobs phase)
 └── package.json            # npm workspaces root
@@ -110,6 +112,7 @@ npm run dev
 | `npm run build` | Compile server (`tsc`) and bundle client (Vite) |
 | `npm run typecheck` | Strict TS across both workspaces |
 | `npm run lint` | ESLint (typed rules, zero warnings allowed) |
+| `npm test` | Frontend unit/component tests (Vitest + Testing Library) |
 | `npm run verify` | typecheck + lint + build |
 | `npm run db:up` / `npm run db:down` | Start/stop local MongoDB |
 | `npm run db:memory` | Fallback in-memory Mongo when Docker is unavailable |

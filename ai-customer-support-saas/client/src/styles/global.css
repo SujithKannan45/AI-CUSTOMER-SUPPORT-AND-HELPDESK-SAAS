@@ -1,14 +1,46 @@
 @import "tailwindcss";
 
 /*
- * Design tokens — single source of truth for the product's visual language.
- * Tailwind v4 generates utilities (bg-brand-600, text-ink-500, …) from these.
+ * Design tokens — the single source of truth for the product's visual language.
+ *
+ * Two layers:
+ *  1. Primitives (`@theme`): fixed palettes, spacing, radii, elevation, motion.
+ *  2. Semantics (`@theme inline` + CSS variables): components reference roles
+ *     (`bg-surface`, `text-muted`, `border-border`), never raw hex values, so
+ *     switching `data-theme` on <html> repaints the whole app.
+ *
+ * Tailwind v4 `inline` keeps the utility pointing at `var(--surface)` instead of
+ * baking the current value, which is what makes runtime theming work.
  */
-@theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial, sans-serif;
 
-  /* Brand — calm, professional indigo */
+/* Dark mode follows the app's own attribute, not only the OS setting. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  /* Spacing base: every spacing utility is a multiple of 4px. */
+  --spacing: 0.25rem;
+
+  /* Radii — controls use md/lg, surfaces xl, overlays 2xl. Never invent values. */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+
+  /* Motion — short and purposeful; every transition uses these easings. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Elevation — three levels only. */
+  --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 1px 3px 0 rgb(15 23 42 / 0.06);
+  --shadow-popover: 0 8px 24px -8px rgb(15 23 42 / 0.18), 0 2px 6px -2px rgb(15 23 42 / 0.08);
+  --shadow-modal: 0 24px 56px -16px rgb(15 23 42 / 0.32);
+
+  /* Brand primitive — calm, professional indigo. */
   --color-brand-50: #eef2ff;
   --color-brand-100: #e0e7ff;
   --color-brand-200: #c7d2fe;
@@ -20,7 +52,7 @@
   --color-brand-800: #3730a3;
   --color-brand-900: #312e81;
 
-  /* Neutral ink scale for text and surfaces */
+  /* Neutral primitive — text and legibility anchors. */
   --color-ink-50: #f8fafc;
   --color-ink-100: #f1f5f9;
   --color-ink-200: #e2e8f0;
@@ -31,22 +63,174 @@
   --color-ink-700: #334155;
   --color-ink-800: #1e293b;
   --color-ink-900: #0f172a;
-
-  --color-success: #16a34a;
-  --color-warning: #d97706;
-  --color-danger: #dc2626;
+  --color-ink-950: #020617;
 }
 
-/* Subtle full-page motion for route transitions (applied by <PageTransition/>). */
-html {
-  scroll-behavior: smooth;
+/* Semantic tokens — components use these; only this block changes per theme. */
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-strong: var(--success-strong);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-strong: var(--warning-strong);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-strong: var(--danger-strong);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-strong: var(--info-strong);
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
 }
 
-body {
-  @apply bg-ink-50 font-sans text-ink-800 antialiased;
+:root {
+  --background: #f8fafc;
+  --surface: #ffffff;
+  --surface-subtle: #f8fafc;
+  --surface-hover: #f1f5f9;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --foreground: #0f172a;
+  --muted: #64748b;
+
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-soft: #eef2ff;
+  --primary-foreground: #ffffff;
+
+  --success: #15803d;
+  --success-soft: #f0fdf4;
+  --success-strong: #166534;
+  --warning: #b45309;
+  --warning-soft: #fffbeb;
+  --warning-strong: #92400e;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+  --danger-strong: #b91c1c;
+  --danger-foreground: #ffffff;
+  --info: #0369a1;
+  --info-soft: #f0f9ff;
+  --info-strong: #075985;
+
+  --ring: #6366f1;
+  --overlay: rgb(15 23 42 / 0.45);
+
+  /* Z-index layers — every stacking context uses one of these, no magic numbers. */
+  --z-base: 0;
+  --z-sticky: 20;
+  --z-overlay: 30;
+  --z-drawer: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+  --z-tooltip: 70;
 }
 
-/* Consistent focus rings for keyboard users across the app. */
-:where(a, button, input, select, textarea):focus-visible {
-  @apply outline-2 outline-offset-2 outline-brand-500;
+[data-theme="dark"] {
+  --background: #080e19;
+  --surface: #0f1828;
+  --surface-subtle: #0b1322;
+  --surface-hover: #17233a;
+  --border: #223049;
+  --border-strong: #33425e;
+  --foreground: #e8eef9;
+  --muted: #94a3b8;
+
+  --primary: #818cf8;
+  --primary-hover: #a5b4fc;
+  --primary-soft: rgb(129 140 248 / 0.16);
+  --primary-foreground: #0b1220;
+
+  --success: #4ade80;
+  --success-soft: rgb(74 222 128 / 0.14);
+  --success-strong: #86efac;
+  --warning: #fbbf24;
+  --warning-soft: rgb(251 191 36 / 0.14);
+  --warning-strong: #fcd34d;
+  --danger: #f87171;
+  --danger-soft: rgb(248 113 113 / 0.14);
+  --danger-strong: #fca5a5;
+  --danger-foreground: #0b1220;
+  --info: #38bdf8;
+  --info-soft: rgb(56 189 248 / 0.14);
+  --info-strong: #7dd3fc;
+
+  --ring: #a5b4fc;
+  --overlay: rgb(2 6 23 / 0.72);
+
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-popover: 0 10px 28px -10px rgb(0 0 0 / 0.6);
+  --shadow-modal: 0 28px 64px -20px rgb(0 0 0 / 0.7);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+  }
+
+  /* Visible focus for keyboard users, never a hover-only affordance. */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+
+  ::selection {
+    @apply bg-primary-soft text-foreground;
+  }
+}
+
+/* Z-index utilities bound to the layer tokens above. */
+@utility z-base {
+  z-index: var(--z-base);
+}
+@utility z-sticky {
+  z-index: var(--z-sticky);
+}
+@utility z-overlay {
+  z-index: var(--z-overlay);
+}
+@utility z-drawer {
+  z-index: var(--z-drawer);
+}
+@utility z-modal {
+  z-index: var(--z-modal);
+}
+@utility z-toast {
+  z-index: var(--z-toast);
+}
+@utility z-tooltip {
+  z-index: var(--z-tooltip);
+}
+
+/* Honour the user's motion preference globally (animations are decorative). */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

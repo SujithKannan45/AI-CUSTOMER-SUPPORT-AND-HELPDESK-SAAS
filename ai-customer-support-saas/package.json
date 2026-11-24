@@ -19,6 +19,7 @@
     "build": "npm run build --workspace server && npm run build --workspace client",
     "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace client",
     "lint": "npm run lint --workspace server && npm run lint --workspace client",
+    "test": "npm run test --workspace client",
     "verify": "npm run typecheck && npm run lint && npm run build"
     ,
     "db:up": "docker compose -f docker-compose.yml up -d mongo",

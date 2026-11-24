@@ -1,45 +1,67 @@
-import { forwardRef, type InputHTMLAttributes, type JSX, type TextareaHTMLAttributes } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { cn } from '@/utils/cn.util';
+import { fieldDescriptionId, fieldErrorId } from './field-ids';
 
-const fieldBase =
-  'w-full rounded-lg border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:cursor-not-allowed disabled:bg-ink-100';
+export interface FieldProps {
+  /** Control id — also used to derive the description/error ids. */
+  id: string;
+  label: string;
+  description?: string;
+  error?: string;
+  required?: boolean;
+  children: ReactNode;
+  className?: string;
+}
 
-export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }>(
-  ({ className, invalid, ...props }, ref) => (
-    <input
-      ref={ref}
-      className={cn(fieldBase, invalid && 'border-danger focus:border-danger focus:ring-red-200', className)}
-      aria-invalid={invalid}
-      {...props}
-    />
-  ),
-);
-Input.displayName = 'Input';
-
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean }>(
-  ({ className, invalid, ...props }, ref) => (
-    <textarea
-      ref={ref}
-      className={cn(fieldBase, 'min-h-24 resize-y', invalid && 'border-danger focus:border-danger focus:ring-red-200', className)}
-      aria-invalid={invalid}
-      {...props}
-    />
-  ),
-);
-Textarea.displayName = 'Textarea';
-
-export function FieldLabel({ htmlFor, children }: { htmlFor: string; children: string }): JSX.Element {
+/**
+ * Form field wrapper: label, optional description, optional error message.
+ *
+ * The control stays a real input owned by the caller. Wire the ARIA
+ * relationships with `fieldDescribedBy(id, { description, error })` from
+ * `./field-ids` so the description and error are announced together, in order.
+ */
+export function Field({ id, label, description, error, required = false, children, className }: FieldProps): JSX.Element {
   return (
-    <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-ink-700">
+    <div className={cn('space-y-1.5', className)}>
+      <FieldLabel htmlFor={id} required={required}>
+        {label}
+      </FieldLabel>
       {children}
+      <FieldDescription id={fieldDescriptionId(id)}>{description}</FieldDescription>
+      <FieldError id={fieldErrorId(id)} message={error} />
+    </div>
+  );
+}
+
+export function FieldLabel({ htmlFor, required = false, children }: { htmlFor: string; required?: boolean; children: string }): JSX.Element {
+  return (
+    <label htmlFor={htmlFor} className="block text-sm font-medium text-foreground">
+      {children}
+      {required ? (
+        <>
+          <span aria-hidden className="ml-0.5 text-danger">
+            *
+          </span>
+          <span className="sr-only"> (required)</span>
+        </>
+      ) : null}
     </label>
   );
 }
 
-export function FieldError({ id, message }: { id: string; message?: string }): JSX.Element | null {
-  if (!message) return null;
+export function FieldDescription({ id, children }: { id: string; children?: ReactNode }): JSX.Element | null {
+  if (children === undefined) return null;
   return (
-    <p id={id} role="alert" className="mt-1.5 text-xs text-danger">
+    <p id={id} className="text-xs leading-5 text-muted">
+      {children}
+    </p>
+  );
+}
+
+export function FieldError({ id, message }: { id: string; message?: string }): JSX.Element | null {
+  if (message === undefined || message.length === 0) return null;
+  return (
+    <p id={id} role="alert" className="text-xs font-medium text-danger">
       {message}
     </p>
   );

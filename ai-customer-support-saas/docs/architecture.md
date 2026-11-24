@@ -970,19 +970,29 @@ boot-guarded decision (`STORAGE_ALLOW_LOCAL_PRODUCTION`).
 
 ## Client architecture
 
-- Feature-first: `features/<domain>/` will hold each domain's pages,
-  components, hooks, and `services/<domain>.service.ts` API client.
-- Components: `components/ui` (design system: Button, Input, Badge, Card…)
-  and `components/feedback` (states, boundary) — the only place allowed to
-  know Tailwind class combinations; features compose them.
-- State: Zustand only for genuinely global UI state; server data will flow
-  through typed services + React Query when the data phases begin.
-- Routing: React Router 7 data router; feature routes are code-split; the
-  auth guard wraps protected subtrees once auth lands.
-- Error containment: `ErrorBoundary` at the app root; states (`LoadingState`,
-  `ErrorState`, `EmptyState`) keep async surfaces consistent.
-- Design tokens in `styles/global.css` (@theme): brand, ink, success/warning/
-  danger palettes drive utilities like `bg-brand-600`, `text-ink-500`.
+Full detail lives in [`docs/frontend.md`](frontend.md); the invariants:
+
+- **Feature-first modules**: `features/<domain>/` owns a domain's types,
+  service, store and components. Cross-feature imports are not allowed; shared
+  code goes to `components/`, `hooks/`, `services/`, `utils/`.
+- **Design system** in `components/ui` — semantic tokens only (`bg-surface`,
+  `text-muted`, `border-border`), light/dark via `data-theme` on `<html>`.
+  Features compose these components instead of writing Tailwind clusters.
+- **State**: Zustand for UI state (sidebar, theme), session and active
+  workspace; everything else is local. Server data flows through typed
+  services, never through components building URLs.
+- **Routing**: React Router 7 data router; `/login` is public, everything else
+  is wrapped by `RequireAuth` (silent refresh-cookie bootstrap → `/auth/me`)
+  inside `AppLayout`, with lazy page chunks.
+- **API client**: single `fetch` owner with bearer injection, request timeout,
+  envelope unwrapping, one single-flight refresh-and-retry on 401, and a
+  refresh-block after failure (no loops). Access tokens stay in memory; the
+  refresh token stays in its HttpOnly cookie.
+- **Error containment**: `ErrorBoundary` at the app root; shared
+  `LoadingState`/`ErrorState`/`EmptyState` keep async surfaces consistent, and
+  toasts cover mutation feedback.
+- **Testing**: Vitest + Testing Library (jsdom) for component contracts and
+  the API client's refresh/error behaviour.
 
 ## Lifecycle & shutdown
 

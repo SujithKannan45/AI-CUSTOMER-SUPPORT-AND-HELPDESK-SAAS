@@ -1,18 +1,24 @@
-import type { JSX } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { CloudCheck, CloudOff, Loader2 } from 'lucide-react';
-import { Card, CardBody, CardTitle } from '@/components/ui/card';
+import { Card, CardBody, CardDescription, CardTitle } from '@/components/ui/card';
 import { healthService } from '@/services/health.service';
 import type { HealthReadinessResponse } from '@/types/api.types';
 
 type Status = 'checking' | 'ok' | 'degraded' | 'offline';
 
+const LABEL: Record<Status, string> = {
+  checking: 'Checking API…',
+  ok: 'API operational',
+  degraded: 'API degraded — database unreachable',
+  offline: 'API unreachable',
+};
+
 /**
  * Live readiness probe against `/health/ready` through the dev proxy.
- * Demonstrates the API service foundation end-to-end; remains useful as a
- * genuine environment check until real features replace this surface.
+ * Kept as a genuine environment check: it proves the API client, envelope
+ * handling and error path end-to-end without inventing product data.
  */
-export function ClientStatusCard(): JSX.Element {
+export function ApiStatusCard(): JSX.Element {
   const [status, setStatus] = useState<Status>('checking');
   const [detail, setDetail] = useState<HealthReadinessResponse | null>(null);
 
@@ -36,28 +42,21 @@ export function ClientStatusCard(): JSX.Element {
     };
   }, []);
 
-  const label: Record<Status, string> = {
-    checking: 'Checking API…',
-    ok: 'API operational',
-    degraded: 'API degraded — database unreachable',
-    offline: 'API unreachable',
-  };
-
   return (
     <Card>
-      <CardBody className="flex items-center gap-4">
+      <CardBody className="flex items-start gap-3.5">
         {status === 'checking' ? (
-          <Loader2 aria-hidden className="h-6 w-6 animate-spin text-ink-400" />
+          <Loader2 aria-hidden className="h-5 w-5 animate-spin text-muted" />
         ) : status === 'ok' ? (
-          <CloudCheck aria-hidden className="h-6 w-6 text-success" />
+          <CloudCheck aria-hidden className="h-5 w-5 text-success" />
         ) : (
-          <CloudOff aria-hidden className="h-6 w-6 text-danger" />
+          <CloudOff aria-hidden className="h-5 w-5 text-danger" />
         )}
-        <div>
-          <CardTitle>{label[status]}</CardTitle>
-          <p className="mt-0.5 text-xs text-ink-500">
-            {detail ? `Database: ${detail.services.database}` : 'GET /health/ready'}
-          </p>
+        <div className="min-w-0">
+          <CardTitle>{LABEL[status]}</CardTitle>
+          <CardDescription>
+            {detail !== null ? `Database: ${detail.services.database}` : 'GET /health/ready'}
+          </CardDescription>
         </div>
       </CardBody>
     </Card>

@@ -1,14 +1,21 @@
 import { create } from 'zustand';
+import { readStorage, STORAGE_KEYS, writeStorage } from '@/utils/storage.util';
+import { isThemePreference, type ThemePreference } from '@/utils/theme.util';
 
 export interface UiState {
-  /** Mobile-first: sidebar collapses into an overlay below `lg`. */
+  /** Mobile-first: the sidebar collapses into an overlay below `lg`. */
   sidebarOpen: boolean;
   toggleSidebar: () => void;
   closeSidebar: () => void;
 
-  /** Theme preference ('system' follows the OS setting). */
-  theme: 'light' | 'dark' | 'system';
-  setTheme: (theme: 'light' | 'dark' | 'system') => void;
+  /** Theme preference ('system' follows the OS setting). Persisted locally. */
+  theme: ThemePreference;
+  setTheme: (theme: ThemePreference) => void;
+}
+
+function initialTheme(): ThemePreference {
+  const stored = readStorage(STORAGE_KEYS.theme);
+  return isThemePreference(stored) ? stored : 'system';
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -16,6 +23,9 @@ export const useUiStore = create<UiState>((set) => ({
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   closeSidebar: () => set({ sidebarOpen: false }),
 
-  theme: 'system',
-  setTheme: (theme) => set({ theme }),
+  theme: initialTheme(),
+  setTheme: (theme) => {
+    writeStorage(STORAGE_KEYS.theme, theme);
+    set({ theme });
+  },
 }));

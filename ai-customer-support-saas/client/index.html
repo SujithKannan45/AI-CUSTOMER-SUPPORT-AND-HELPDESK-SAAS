@@ -5,7 +5,27 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="AI-powered customer support & helpdesk platform for support teams." />
+    <meta name="color-scheme" content="light dark" />
     <title>AI Customer Support SaaS</title>
+    <script>
+      /*
+       * Applies the stored theme before the first paint so dark-mode users do
+       * not see a white flash. Mirrors src/utils/theme.util.ts — the React
+       * ThemeProvider keeps it in sync afterwards.
+       */
+      (function () {
+        try {
+          var stored = window.localStorage.getItem('ui-theme');
+          var preference = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = preference === 'system' ? (prefersDark ? 'dark' : 'light') : preference;
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+        } catch (error) {
+          document.documentElement.dataset.theme = 'light';
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
