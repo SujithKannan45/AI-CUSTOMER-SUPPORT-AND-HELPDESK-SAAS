@@ -1,10 +1,11 @@
-# Frontend architecture, design system & auth UI (Prompts 19–20)
+# Frontend architecture, design system, auth UI & dashboard (Prompts 19–21)
 
 This document describes the React application as it exists today. It is a
 maintainer's guide, not a roadmap: every path, token and behaviour named here is
 implemented in `client/`. Prompt 20 added the real sign-in, password-recovery,
 session, sign-out and workspace-selection surfaces on top of the Prompt 19
-foundation.
+foundation. Prompt 21 replaced the dashboard placeholder with a live workspace
+analytics dashboard built on the Prompt 18 API.
 
 The frontend is a **React 19 + TypeScript (strict) SPA** built with Vite,
 routed by React Router 7's data router, styled with Tailwind CSS 4 design
@@ -58,7 +59,8 @@ client/
     │   ├── auth/               # session store, validation, errors, sign-out hook,
     │   │                       # sign-in/forgot-password/auth-shell components
     │   ├── workspace/          # types, service, store, hooks, create dialog
-    │   ├── dashboard/          # dashboard-only components
+    │   ├── analytics/          # Prompt 21 types, service, date model, hook, charts
+    │   ├── dashboard/          # foundation-only dashboard components
     │   └── notifications/      # unread-count service
     ├── hooks/                  # use-debounce, use-media-query, use-theme, use-toast
     ├── layouts/                # app-layout + sidebar/header/workspace-switcher/…
@@ -244,7 +246,7 @@ container.
 | `/login` | public | real sign-in form; authenticated visitors are redirected away |
 | `/reset-password?email&token` | public | password-reset form consuming the emailed token |
 | `/workspaces/select` | session only | workspace picker / empty-workspace state + creation |
-| `/`, `/dashboard` | session + workspace | `RequireAuth` → `RequireWorkspace` → `AppLayout` → lazy `DashboardPage` |
+| `/`, `/dashboard` | session + workspace | `RequireAuth` → `RequireWorkspace` → `AppLayout` → lazy `DashboardPage` (Prompt 21 analytics dashboard) |
 | `*` | session + workspace | not-found page inside the shell |
 
 `RequireAuth` (`app/guards/require-auth.tsx`):
@@ -346,7 +348,7 @@ The backend really implements recovery, so the UI does too:
   server's password policy (8–128 chars, letter + digit) and confirmation
   match. On success it returns to `/login` with a one-time success notice.
 - Registration and email verification screens are **not** part of Prompt 20
-  (see §15).
+  (see §16).
 
 ### Session lifecycle
 
@@ -419,7 +421,123 @@ there are no invite or member-management endpoints. No invitation UI, fake
 member records or simulated emails were created. That capability needs a
 backend phase first.
 
-## 10. API client
+## 10. Admin dashboard (Prompt 21)
+
+### Route and components
+
+The existing `/dashboard` placeholder is now the real workspace dashboard:
+
+| Piece | Location | Responsibility |
+| --- | --- | --- |
+| `DashboardPage` | `pages/dashboard.page.tsx` | Owns the date selection and the page-level state switch (loading / error / forbidden / empty / data) |
+| `DashboardHeader` | `features/analytics/components/dashboard-header.tsx` | Title, description, current workspace + role, preset/custom range control, refresh |
+| `KpiGrid`, `KpiCard` | `…/kpi-grid.tsx` | Six KPI tiles mapped 1:1 to API fields |
+| `TicketTrendChart` | `…/ticket-trend-chart.tsx` | Responsive inline-SVG created/resolved trend, hover + keyboard inspection |
+| `StatusDistribution` | `…/status-distribution.tsx` | Current ticket mix from `byStatus` |
+| `ResolutionPerformance` | `…/resolution-performance.tsx` | Backend duration and backlog metrics |
+| `DashboardLoadingState`, `DashboardForbiddenState` | `…/dashboard-states.tsx` | Skeleton and 403 surfaces (reuses `EmptyState`/`ErrorState` elsewhere) |
+
+The old `features/dashboard/components/api-status-card.tsx` still exists but is
+no longer rendered: the dashboard now shows product data, not a health probe.
+
+### Analytics endpoints consumed
+
+All calls go through the single HTTP client and the active workspace from the
+workspace store. IDs are encoded into the path; the server resolves membership
+and the `analytics.view` permission on every request.
+
+| Service method | Endpoint | Query |
+| --- | --- | --- |
+| `analyticsService.getOverview` | `GET /api/v1/workspaces/:id/analytics/overview` | `range`, and `from`/`to` for custom |
+| `analyticsService.getTickets` | `GET …/analytics/tickets` | `range`, optional `bucket`, custom bounds |
+| `analyticsService.getPerformance` | `GET …/analytics/performance` | `range`, and custom bounds |
+
+Fields actually rendered: `tickets.total`, `createdInPeriod`, `resolvedInPeriod`,
+`byStatus`; `customers.total`, `newInPeriod`; `performance.backlog.totalBacklog`,
+`unassigned`; `resolutionTime.averageMs`, `medianMs`, `count`;
+`firstStaffReply.averageMs`, `conversations`; the server-resolved `period` for
+the window label. AI, escalation, knowledge-base and CSV-report reads are **not**
+used by this dashboard (they exist in the API but are outside Prompt 21's scope).
+
+**Scope is stated in the UI, not guessed.** The backend's `overview`/`tickets`
+totals and `byStatus` counts cover all live tickets in the workspace (the
+aggregation is not date-filtered); `createdInPeriod`, `resolvedInPeriod`,
+durations and first-reply metrics are window-scoped. KPI hints and the status
+card caption say which is which.
+
+### Data fetching, refresh and tenant safety
+
+`useDashboardAnalytics` (`features/analytics/use-dashboard-analytics.ts`) loads
+the three reads with `Promise.all` and has no cache library:
+
+- The hook is keyed on `workspaceId` + normalized filter. A workspace or range
+  change immediately clears previously rendered data (a synchronous scope guard
+  in the hook return prevents even one frame of the old tenant's numbers).
+- Every load increments a request sequence; a response is applied only when its
+  sequence is still current. An older workspace/range can therefore never
+  overwrite the active one, even if it resolves later. `AbortController` cancels
+  the request on cleanup as a best-effort optimization.
+- A same-scope refresh keeps the current data visible (`refreshing`) instead of
+  flashing skeletons; a scope change shows the loading skeleton.
+- `refresh()` refetches all three reads; preset/custom range changes go through
+  the same path.
+- Errors are mapped by status only (403, 404, 429, network, 5xx); response
+  bodies and request ids are never shown.
+
+There is still no React Query: the dashboard is the only server-data surface
+with overlapping-request risk today, and the sequence guard plus typed service
+covers it without a new dependency. When ticket/inbox lists land, revisit that
+decision centrally (see §12).
+
+### Date ranges
+
+Presets are exactly the backend presets: **Last 7 / 30 / 90 days**. **Custom**
+is supported by the API, so it is supported here:
+
+- Two calendar-day inputs are validated locally (both present, real dates,
+  start ≤ end, ≤ 366 days). Invalid input shows an alert and never calls the
+  API.
+- Calendar days are converted to UTC half-open bounds: `from` at `00:00Z`,
+  `to` **exclusive** at the next UTC midnight. This matches the server's
+  convention and avoids boundary double-counting.
+- Custom windows > 45 days request `bucket=week`, and > 180 days `bucket=month`
+  so axis labels stay readable; presets use `day`. This is presentation only —
+  the server still owns bucketing and zero-filling, and the chart formats labels
+  with the `bucket` returned in `period`.
+- The header shows the server-resolved window (`period.from`/`period.to`) and
+  that analytics is UTC.
+
+### Metrics and definitions
+
+- KPIs: total live tickets, active backlog (`OPEN + IN_PROGRESS +
+  WAITING_FOR_CUSTOMER`, as defined by the performance endpoint), created in
+  period, resolved in period, average resolution time, total customers with a
+  new-in-period hint.
+- Durations come from the API (`resolvedAt − createdAt`, null/negative excluded
+  server-side) and are formatted as `< 1 min`, `45m`, `1h 30m`, `3d 4h`. A
+  server `null` renders as `—`, never a fabricated zero.
+- The status chart uses the actual enum labels (Open, In progress, Waiting for
+  customer, Resolved, Closed) and raw counts; bar length is relative to the
+  largest status, a visual aid only.
+- First staff reply is labelled as public-reply-only; customer first-response is
+  explicitly reported as not measurable in this deployment.
+
+### States and charts
+
+- Loading: skeleton KPI/chart blocks with a `role="status"` announcement.
+- Refreshing: existing data stays, header action shows progress and an
+  `aria-live` notice.
+- Error: retryable `ErrorState`; 403 renders the non-retryable “Analytics access
+  required” surface (agents/viewers without `analytics.view`).
+- Empty: a workspace with no tickets, customers or conversations shows “No
+  analytics yet”; the trend shows “No ticket activity in this period” for an
+  all-zero window; the status card shows “No tickets yet” when the total is 0.
+- Charts are hand-built SVG (no chart dependency): responsive width via
+  `ResizeObserver`, theme colours from semantic CSS variables, dashed grid,
+  visible values, hover tooltips, arrow/Home/End inspection and an aria-live
+  summary. Zero-filled server buckets are plotted as real zeros.
+
+## 11. API client
 
 `services/http-client.service.ts` is the only module that calls `fetch`.
 
@@ -451,7 +569,7 @@ thin typed wrappers; components never build URLs.
 
 ---
 
-## 11. State management
+## 12. State management
 
 | State | Where | Why |
 | --- | --- | --- |
@@ -459,17 +577,20 @@ thin typed wrappers; components never build URLs.
 | Session: status, user, bootstrap/startSession/signOut | `features/auth/auth.store.ts` (Zustand) | needed by the guard, header and every page |
 | Workspace list, active workspace, create | `features/workspace/workspace.store.ts` (Zustand) | one fetch per session, read by the shell |
 | Toasts | React state in `ToastProvider` | transient, owned by one subtree |
+| Dashboard analytics, date window, refresh | `useDashboardAnalytics` (component state) | page-scoped, keyed on workspace + range; not global |
 | Form input, open/closed UI, fetched page data | local component state | the default; do not globalise it |
 
 Server data is fetched by the surface that needs it through a typed service.
-There is **no** React Query today: the pages that would justify a cache
-(tickets, inbox, analytics) are Prompt 21+. When one lands, add TanStack Query
-in `AppProviders` and keep the existing services as the fetch layer — the
-component API does not change.
+There is **no** React Query today. The analytics dashboard uses the page-scoped
+`useDashboardAnalytics` hook because its only cache concern is “never show
+another tenant's data”, solved with a sequence guard. When the ticket/inbox
+lists (Prompt 22+) need cross-page caching, add TanStack Query in
+`AppProviders` and keep the existing services as the fetch layer — the component
+API does not change.
 
 ---
 
-## 12. Responsive & accessibility conventions
+## 13. Responsive & accessibility conventions
 
 - Mobile-first utility classes; breakpoints used: `sm`, `md`, `lg`.
 - Every interactive control is a real `button`/`a`/`input` with an accessible
@@ -486,7 +607,7 @@ component API does not change.
 
 ---
 
-## 13. Tests
+## 14. Tests
 
 ```bash
 npm run test --workspace client      # vitest run
@@ -496,7 +617,7 @@ npm run test:watch --workspace client
 Configuration: `client/vitest.config.ts` (jsdom, React plugin, `@` alias,
 `src/test/setup.ts`). Tests live next to the code as `*.test.ts(x)`.
 
-Covered today (91 tests, 22 files):
+Covered today (125 tests, 28 files):
 
 - `Button` — label, variants, loading/disabled, click, keyboard activation.
 - `Modal` — portal/ARIA, focus in, Escape, close button, Tab containment.
@@ -526,15 +647,28 @@ Covered today (91 tests, 22 files):
   no-op, creation activation, reset.
 - Workspace picker / create dialog / `UserMenu` — loading, empty, error, list,
   selection, creation validation/conflict, sign-out success and failure.
+- Analytics service — preset/custom query construction, bucket parameter, abort
+  signal forwarding, workspace-id encoding.
+- Dashboard date model/formatting — UTC half-open conversion, 366-day limit,
+  bucket coarsening, period/bucket labels, duration formatting.
+- `useDashboardAnalytics` — three reads, no-workspace no-op, immediate tenant
+  clear, stale-response rejection across workspace switches, custom windows,
+  403 mapping, refresh.
+- `DashboardPage` — KPI/status/trend rendering, loading, empty workspace,
+  retryable error, 403, preset + custom range changes, invalid custom range,
+  refresh, workspace switch without stale values.
+- `TicketTrendChart` — series/total rendering, all-zero empty state, keyboard
+  bucket inspection.
 - Theme utilities — resolution and DOM application.
 
-Not covered: pixel-level visual regressions, backend integration tests of the
-logged-in flows (verified manually in the browser, see below), and the
-dashboard’s live API status card (needs a running server).
+Not covered: pixel-level visual regressions, and automated end-to-end tests of
+the logged-in flows (verified manually in the browser against the real API).
+Dashboard component tests mock the analytics service; the browser run used the
+actual Prompt 18 endpoints and real ticket records.
 
 ---
 
-## 14. Extending the frontend (Prompts 21–25)
+## 15. Extending the frontend (Prompts 22–25)
 
 1. **Add the route** in `route-paths.ts`, the page in `features/<domain>/pages/`
    and a child route under `AppLayout` (`lazy()`), then enable the nav entry.
@@ -542,7 +676,9 @@ dashboard’s live API status card (needs a running server).
    exact backend path and the server’s response types; never build URLs in
    components.
 3. **Reuse the design system** — Card/Table/Tabs/Field/Badge/EmptyState cover
-   most list and form surfaces; add a variant before adding a component.
+   most list and form surfaces; add a variant before adding a component. The
+   dashboard's KPI/status/chart pieces are analytics-specific, not generic
+   dashboard primitives.
 4. **Wire mutations** through `useToast()` for success, `ErrorState`/`Field`
    for failure, and `ConfirmDialog` for anything destructive.
 5. **Keep the tenant honest:** read `workspaceId` from the active workspace or
@@ -553,7 +689,7 @@ dashboard’s live API status card (needs a running server).
 
 ---
 
-## 15. Known limitations
+## 16. Known limitations
 
 - **Signup and email-verification screens are not implemented.** The backend
   supports `POST /auth/register` and `POST /auth/verify-email`; no UI was built
@@ -567,10 +703,23 @@ dashboard’s live API status card (needs a running server).
   in-process outbox with no HTTP access. The request endpoint, malformed-link
   state and real invalid/expired-token response were verified; a real inbox is
   needed to complete a reset.
+- **Dashboard counts have mixed scopes by backend design.** `total`, `byStatus`,
+  active backlog and customer totals cover all current workspace records;
+  period counts and durations are window-scoped. The UI labels this, but an
+  admin should not read the status mix as “status within the selected range”.
+- **The dashboard consumes only overview/tickets/performance.** AI analytics
+  (`/analytics/ai`) and the CSV ticket report exist but are outside Prompt 21's
+  dashboard scope; no report-builder UI was added.
+- **Analytics is not available to agents/viewers** (`analytics.view` is
+  owner/admin). Those roles see the 403 surface on `/dashboard`; a role-specific
+  landing surface is a later product decision.
+- **Custom windows are capped at 366 days** and always computed in UTC; the
+  workspace timezone string is not used for bucketing (server limitation).
 - **Workspace settings/rename UI is not included** (the `PATCH /workspaces/:id`
   backend route exists; settings screens belong to a later prompt).
-- **No route exists yet for tickets/conversations/customers/KB/analytics/
-  settings**; their nav entries are `aria-disabled` so nothing 404s.
+- **No route exists yet for tickets/conversations/customers/KB/settings or a
+  separate analytics report page**; their nav entries are `aria-disabled` so
+  nothing 404s. The analytics *dashboard* is `/dashboard`, not `/analytics`.
 - **Notification bell is read-only** — it shows the caller’s real unread count
   but the inbox route ships later.
 - **No React Query / server cache**; each surface fetches what it renders.

@@ -1,111 +1,102 @@
-import type { JSX } from 'react';
-import { Building2, ShieldCheck, Sparkles } from 'lucide-react';
-import { PageHeader } from '@/components/common/page-header';
+import { useState, type JSX } from 'react';
+import { Building2 } from 'lucide-react';
+import { EmptyState, ErrorState } from '@/components/feedback/states';
 import { PageTransition } from '@/components/common/page-transition';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardBody, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ApiStatusCard } from '@/features/dashboard/components/api-status-card';
-import { useSessionStore } from '@/features/auth/auth.store';
+import { DashboardForbiddenState, DashboardLoadingState } from '@/features/analytics/components/dashboard-states';
+import { DashboardHeader } from '@/features/analytics/components/dashboard-header';
+import { KpiGrid } from '@/features/analytics/components/kpi-grid';
+import { ResolutionPerformance } from '@/features/analytics/components/resolution-performance';
+import { StatusDistribution } from '@/features/analytics/components/status-distribution';
+import { TicketTrendChart } from '@/features/analytics/components/ticket-trend-chart';
+import { DEFAULT_SELECTION, type DashboardSelection } from '@/features/analytics/date-range';
+import { useDashboardAnalytics } from '@/features/analytics/use-dashboard-analytics';
+import type { DashboardAnalytics } from '@/features/analytics/types';
 import { useActiveWorkspace } from '@/features/workspace/use-workspace';
-import { ROLE_LABELS } from '@/features/workspace/types';
 
-function firstName(name: string): string {
-  return name.trim().split(/\s+/)[0] ?? name;
+function hasNoSupportActivity(data: DashboardAnalytics): boolean {
+  return (
+    data.overview.tickets.total === 0 &&
+    data.overview.customers.total === 0 &&
+    data.overview.conversations.total === 0
+  );
 }
 
 /**
- * Landing surface for the signed-in shell. Everything rendered here comes from
- * the API (session + workspace) or from a live health probe — no invented
- * metrics, no fake activity feed.
+ * Workspace admin dashboard (Prompt 21).
+ *
+ * Reads only Prompt 18 analytics endpoints through the shared HTTP client, for
+ * the workspace currently selected in the shell. The hook owns loading,
+ * refresh, workspace-change invalidation and stale-response rejection; this
+ * page owns the date selection and the page-level state switch.
  */
 export function DashboardPage(): JSX.Element {
-  const user = useSessionStore((state) => state.user);
   const { workspace, role } = useActiveWorkspace();
+  const [selection, setSelection] = useState<DashboardSelection>(DEFAULT_SELECTION);
+
+  const analytics = useDashboardAnalytics({
+    workspaceId: workspace?.id ?? null,
+    preset: selection.kind === 'preset' ? selection.preset : 'custom',
+    ...(selection.kind === 'custom' ? { customFrom: selection.from, customTo: selection.to } : {}),
+  });
+
+  const data = analytics.data;
+  const period = data?.overview.period ?? null;
+  const isBusy = analytics.status === 'loading' || analytics.status === 'refreshing';
 
   return (
-    <PageTransition className="space-y-6">
-      <PageHeader
-        breadcrumbs={[{ label: 'Workspace' }, { label: 'Dashboard' }]}
-        title={user !== null ? `Welcome back, ${firstName(user.name)}` : 'Dashboard'}
-        description="Your support workspace is connected. Tickets, conversations, knowledge and analytics surfaces arrive in the next prompts on top of this shell."
+    <PageTransition className="space-y-4">
+      <DashboardHeader
+        workspaceName={workspace?.name ?? 'No workspace'}
+        role={role}
+        selection={selection}
+        onSelectionChange={setSelection}
+        onRefresh={analytics.refresh}
+        isRefreshing={isBusy}
+        period={period}
+        lastUpdated={analytics.lastUpdated}
       />
 
-      <section aria-label="Workspace summary" className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Building2 aria-hidden className="h-4 w-4 text-muted" />
-                Workspace
-              </CardTitle>
-              <CardDescription>Resolved from your membership via GET /api/v1/workspaces</CardDescription>
-            </div>
-            {role !== null ? <Badge tone="brand">{ROLE_LABELS[role]}</Badge> : null}
-          </CardHeader>
-          <CardBody className="space-y-1.5">
-            {workspace !== null ? (
-              <>
-                <p className="text-sm font-medium text-foreground">{workspace.name}</p>
-                <p className="text-xs text-muted">
-                  <span className="font-mono">{workspace.slug}</span> · {workspace.settings.timezone} ·{' '}
-                  {workspace.settings.locale}
-                </p>
-              </>
-            ) : (
-              <p className="text-sm text-muted">No workspace is available for this account yet.</p>
-            )}
-          </CardBody>
-        </Card>
-
-        <ApiStatusCard />
-      </section>
-
-      <section aria-label="Foundation status" className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <ShieldCheck aria-hidden className="h-4 w-4 text-muted" />
-                Session &amp; security
-              </CardTitle>
-              <CardDescription>How this build handles identity</CardDescription>
-            </div>
-          </CardHeader>
-          <CardBody>
-            <ul className="space-y-2 text-sm leading-6 text-muted">
-              <li>Access tokens live in memory only; the refresh token is an HttpOnly cookie.</li>
-              <li>Failed requests refresh once, then the session is dropped — never a loop.</li>
-              <li>Every workspace call is authorized by the API from your membership row.</li>
-            </ul>
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles aria-hidden className="h-4 w-4 text-muted" />
-                Design system
-              </CardTitle>
-              <CardDescription>Foundation available to every feature</CardDescription>
-            </div>
-          </CardHeader>
-          <CardBody>
-            <div className="flex flex-wrap gap-1.5">
-              <Badge tone="brand">Buttons</Badge>
-              <Badge tone="info">Forms</Badge>
-              <Badge tone="success">Tables</Badge>
-              <Badge tone="warning">Dialogs</Badge>
-              <Badge tone="neutral">Toasts</Badge>
-              <Badge tone="danger">Errors</Badge>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-muted">
-              Semantic tokens drive light and dark themes; components are shared from
-              <span className="font-mono text-xs text-foreground"> components/ui</span>.
-            </p>
-          </CardBody>
-        </Card>
-      </section>
+      {workspace === null ? (
+        <div className="rounded-xl border border-border bg-surface">
+          <EmptyState
+            icon={<Building2 aria-hidden className="h-6 w-6" />}
+            title="No workspace selected"
+            message="Choose a workspace to load its analytics."
+          />
+        </div>
+      ) : analytics.status === 'error' ? (
+        analytics.forbidden ? (
+          <DashboardForbiddenState />
+        ) : (
+          <ErrorState
+            title="Analytics unavailable"
+            message={analytics.error ?? 'The analytics data could not be loaded.'}
+            onRetry={analytics.refresh}
+          />
+        )
+      ) : data === null ? (
+        <DashboardLoadingState />
+      ) : hasNoSupportActivity(data) ? (
+        <div className="rounded-xl border border-border bg-surface">
+          <EmptyState
+            title="No analytics yet"
+            message="This workspace has no tickets or customers recorded yet. Metrics appear here as soon as support activity exists."
+          />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <KpiGrid data={data} />
+          <TicketTrendChart
+            created={data.tickets.created}
+            resolved={data.tickets.resolved}
+            bucket={data.tickets.period.bucket}
+          />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <StatusDistribution byStatus={data.tickets.byStatus} />
+            <ResolutionPerformance performance={data.performance} />
+          </div>
+        </div>
+      )}
     </PageTransition>
   );
 }

@@ -995,6 +995,14 @@ Full detail lives in [`docs/frontend.md`](frontend.md); the invariants:
   envelope unwrapping, one single-flight refresh-and-retry on 401, and a
   refresh-block after failure (no loops). Access tokens stay in memory; the
   refresh token stays in its HttpOnly cookie.
+- **Dashboard analytics**: the page-scoped `useDashboardAnalytics` hook reads
+  `/analytics/overview`, `/tickets` and `/performance` for the active
+  workspace. A request sequence plus a synchronous scope guard ensures a
+  previous workspace/range can neither render nor overwrite after a switch;
+  the frontend never computes a business metric the backend defines.
+- **Analytics permissions**: the client renders 403 as a non-retryable access
+  state. It does not attempt to infer or grant `analytics.view`; the server
+  remains the authorization boundary.
 - **Error containment**: `ErrorBoundary` at the app root; shared
   `LoadingState`/`ErrorState`/`EmptyState` keep async surfaces consistent, and
   toasts cover mutation feedback.
