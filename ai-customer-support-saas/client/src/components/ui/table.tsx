@@ -1,10 +1,17 @@
 import type { HTMLAttributes, JSX, ReactNode, TdHTMLAttributes, ThHTMLAttributes } from 'react';
 import { cn } from '@/utils/cn.util';
 
-/** Horizontally scrollable table surface — never breaks page layout on mobile. */
+/**
+ * Horizontally scrollable table surface — never breaks page layout on mobile.
+ *
+ * `relative` is load-bearing: it makes this element the containing block for
+ * absolutely positioned descendants (notably the screen-reader-only caption),
+ * so a table wider than the viewport scrolls inside here instead of widening
+ * the page and giving the whole layout a horizontal scrollbar.
+ */
 export function Table({ caption, className, children }: { caption?: string; className?: string; children: ReactNode }): JSX.Element {
   return (
-    <div className="w-full overflow-x-auto rounded-xl border border-border bg-surface">
+    <div className="relative w-full overflow-x-auto rounded-xl border border-border bg-surface">
       <table className={cn('w-full border-collapse text-left text-sm', className)}>
         {caption !== undefined ? <caption className="sr-only">{caption}</caption> : null}
         {children}

@@ -1,6 +1,11 @@
 import type { AuthSessionPayload, PublicUser } from '@/features/auth/types';
 import { useSessionStore } from '@/features/auth/auth.store';
 import type { DashboardAnalytics, TicketStatusCounts } from '@/features/analytics/types';
+import type {
+  CustomerDto,
+  CustomerListPayload,
+} from '@/features/customers/types';
+import type { TicketDto, TicketListPayload } from '@/features/tickets/types';
 import type { WorkspaceListItem, WorkspaceRole } from '@/features/workspace/types';
 import { useWorkspaceStore } from '@/features/workspace/workspace.store';
 import { clearAccessToken } from '@/services/auth-token.store';
@@ -197,6 +202,84 @@ export function makeDashboardAnalytics(options: DashboardFixtureOptions = {}): D
         messages: { total: 0, public: 0, internal: 0 },
       },
     },
+  };
+}
+
+/** Deterministic, well-formed ids for customer/ticket fixtures. */
+export const TEST_CUSTOMER_ID = '507f1f77bcf86cd799439011';
+export const TEST_TICKET_ID = '507f1f77bcf86cd799439021';
+export const TEST_SECOND_CUSTOMER_ID = '507f1f77bcf86cd799439013';
+export const TEST_SECOND_TICKET_ID = '507f1f77bcf86cd799439022';
+
+export function makeCustomer(overrides: Partial<CustomerDto> = {}): CustomerDto {
+  return {
+    id: TEST_CUSTOMER_ID,
+    workspaceId: '507f1f77bcf86cd799439012',
+    name: 'Jordan Lee',
+    email: 'jordan@example.com',
+    phone: '+1 555 010 0100',
+    avatarUrl: null,
+    status: 'active',
+    tags: ['vip'],
+    metadata: { crmId: 'crm-1' },
+    lastInteractionAt: '2026-09-10T08:00:00.000Z',
+    archivedAt: null,
+    createdAt: '2026-09-01T09:00:00.000Z',
+    updatedAt: '2026-09-10T08:00:00.000Z',
+    ...overrides,
+  };
+}
+
+export function makeCustomerList(
+  items: readonly CustomerDto[] = [makeCustomer()],
+  overrides: Partial<Omit<CustomerListPayload, 'items'>> = {},
+): CustomerListPayload {
+  const limit = overrides.limit ?? 20;
+  return {
+    items,
+    page: overrides.page ?? 1,
+    limit,
+    total: overrides.total ?? items.length,
+    hasMore: overrides.hasMore ?? false,
+  };
+}
+
+export function makeTicket(overrides: Partial<TicketDto> = {}): TicketDto {
+  return {
+    id: TEST_TICKET_ID,
+    workspaceId: '507f1f77bcf86cd799439012',
+    number: 'TKT-000001',
+    customerId: TEST_CUSTOMER_ID,
+    subject: 'Invoice shows the wrong total',
+    description: 'The September invoice is 20 EUR too high.',
+    status: 'OPEN',
+    priority: 'HIGH',
+    agentId: null,
+    createdById: '507f1f77bcf86cd799439031',
+    tags: ['billing'],
+    category: 'billing',
+    resolutionNote: null,
+    dueAt: null,
+    resolvedAt: null,
+    closedAt: null,
+    archivedAt: null,
+    createdAt: '2026-09-05T10:00:00.000Z',
+    updatedAt: '2026-09-06T11:30:00.000Z',
+    ...overrides,
+  };
+}
+
+export function makeTicketList(
+  items: readonly TicketDto[] = [makeTicket()],
+  overrides: Partial<Omit<TicketListPayload, 'items'>> = {},
+): TicketListPayload {
+  const limit = overrides.limit ?? 20;
+  return {
+    items,
+    page: overrides.page ?? 1,
+    limit,
+    total: overrides.total ?? items.length,
+    hasMore: overrides.hasMore ?? false,
   };
 }
 

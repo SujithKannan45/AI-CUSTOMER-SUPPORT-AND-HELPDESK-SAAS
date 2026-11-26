@@ -60,11 +60,16 @@ client/
     │   │                       # sign-in/forgot-password/auth-shell components
     │   ├── workspace/          # types, service, store, hooks, create dialog
     │   ├── analytics/          # Prompt 21 types, service, date model, hook, charts
+    │   ├── customers/          # Prompt 22 types, service, form model, hooks, components
+    │   ├── tickets/            # Prompt 22 types, service, hooks, components
+    │   ├── access/             # UI-only mirror of the RBAC registry (affordances)
+    │   ├── shared/             # cross-feature error copy + field-error mapping
     │   ├── dashboard/          # foundation-only dashboard components
     │   └── notifications/      # unread-count service
     ├── hooks/                  # use-debounce, use-media-query, use-theme, use-toast
     ├── layouts/                # app-layout + sidebar/header/workspace-switcher/…
-    ├── pages/                  # login, reset-password, workspace picker, dashboard, 404
+    ├── pages/                  # login, reset-password, workspace picker, dashboard,
+    │                           # customers/customer detail, tickets/ticket detail, 404
     ├── services/               # http-client, auth-token store, health
     ├── store/                  # ui.store (sidebar + theme preference)
     ├── styles/global.css       # design tokens, base layer, z-index utilities
@@ -247,6 +252,10 @@ container.
 | `/reset-password?email&token` | public | password-reset form consuming the emailed token |
 | `/workspaces/select` | session only | workspace picker / empty-workspace state + creation |
 | `/`, `/dashboard` | session + workspace | `RequireAuth` → `RequireWorkspace` → `AppLayout` → lazy `DashboardPage` (Prompt 21 analytics dashboard) |
+| `/customers` | session + workspace | customer directory (server-side search, status/archive filter, pagination) |
+| `/customers/:customerId` | session + workspace | customer detail; a malformed id renders a local invalid-link state without a request |
+| `/tickets` | session + workspace | ticket list (server-side search, status/priority filter, pagination) |
+| `/tickets/:ticketId` | session + workspace | ticket detail with the supported status/priority/resolve/reopen actions |
 | `*` | session + workspace | not-found page inside the shell |
 
 `RequireAuth` (`app/guards/require-auth.tsx`):
@@ -348,7 +357,7 @@ The backend really implements recovery, so the UI does too:
   server's password policy (8–128 chars, letter + digit) and confirmation
   match. On success it returns to `/login` with a one-time success notice.
 - Registration and email verification screens are **not** part of Prompt 20
-  (see §16).
+  (see §17).
 
 ### Session lifecycle
 
@@ -487,7 +496,7 @@ the three reads with `Promise.all` and has no cache library:
 There is still no React Query: the dashboard is the only server-data surface
 with overlapping-request risk today, and the sequence guard plus typed service
 covers it without a new dependency. When ticket/inbox lists land, revisit that
-decision centrally (see §12).
+decision centrally (see §13).
 
 ### Date ranges
 
@@ -537,7 +546,145 @@ is supported by the API, so it is supported here:
   visible values, hover tooltips, arrow/Home/End inspection and an aria-live
   summary. Zero-filled server buckets are plotted as real zeros.
 
-## 11. API client
+## 11. Customers & tickets (Prompt 22)
+
+### Routes and pages
+
+| Route | Page | Feature components |
+| --- | --- | --- |
+| `/customers` | `pages/customers.page.tsx` | `CustomerFilters`, `CustomerTable`, `CustomerFormDialog` |
+| `/customers/:customerId` | `pages/customer-detail.page.tsx` | `CustomerProfile`, `CustomerRelatedTickets`, `CustomerFormDialog` |
+| `/tickets` | `pages/tickets.page.tsx` | `TicketFilters`, `TicketTable` |
+| `/tickets/:ticketId` | `pages/ticket-detail.page.tsx` | `TicketHeader`, `TicketControls`, `TicketDetails`, `TicketResolveDialog` |
+
+Both areas mount inside the existing `RequireAuth → RequireWorkspace → AppLayout`
+subtree (no second layout), are lazy-loaded per route, and enable their existing
+sidebar entries. `route-paths.ts` also exports `customerPath(id)` / `ticketPath(id)`
+builders so links encode ids instead of interpolating them.
+
+### Endpoints consumed
+
+All requests go through the single HTTP client and the workspace id from the
+workspace store; the server re-authorizes every call.
+
+| Service method | Endpoint | Notes |
+| --- | --- | --- |
+| `customerService.list` | `GET /api/v1/workspaces/:id/customers` | `page`, `limit`, `search`, `status`, `archiveState`, plus the fixed `sort=createdAt&order=desc` |
+| `customerService.get` | `GET …/customers/:customerId` | live customers only |
+| `customerService.create` | `POST …/customers` | `customer.create` (owner/admin) |
+| `customerService.update` | `PATCH …/customers/:customerId` | `customer.update`; changed fields only |
+| `customerService.archive` | `PATCH …/customers/:customerId/archive` | soft delete |
+| `customerService.restore` | `PATCH …/customers/:customerId/restore` | from the archived filter |
+| `ticketService.list` | `GET …/tickets` | `page`, `limit`, `search`, `status`, `priority`, and `customerId` for related tickets |
+| `ticketService.get` | `GET …/tickets/:ticketId` | live tickets only |
+| `ticketService.setStatus` | `PATCH …/tickets/:id/status` | `{ status }` |
+| `ticketService.setPriority` | `PATCH …/tickets/:id/priority` | `{ priority }` |
+| `ticketService.resolve` | `POST …/tickets/:id/resolve` | optional `{ resolutionNote }` |
+| `ticketService.reopen` | `POST …/tickets/:id/reopen` | no body |
+
+**Fields actually rendered.** Customer: `name`, `email`, `phone`, `avatarUrl`,
+`status`, `tags`, `metadata`, `lastInteractionAt`, `archivedAt`, `createdAt`,
+`updatedAt`, `id`. Ticket: `number`, `subject`, `description`, `status`,
+`priority`, `customerId`, `agentId`, `createdById`, `tags`, `category`,
+`resolutionNote`, `dueAt`, `resolvedAt`, `closedAt`, `archivedAt`, `createdAt`,
+`updatedAt`, `id`. Nothing is invented; a null field renders as an explicit
+absence (`—`, “No email on file”, “Unassigned”).
+
+### Search, filtering and pagination
+
+The backend owns all filtering; the UI only maps controls to its parameters.
+
+- Search is debounced (300 ms) and sent as the server's substring search
+  (`search` over customer name/email, ticket number/subject). Clearing it omits
+  the parameter entirely rather than sending an empty value (which the strict
+  schema would reject).
+- Customer filters: `status=active|blocked` and `archiveState=live|archived|all`.
+  Ticket filters: `status` and `priority` (the real enums). Every filter change
+  resets to page 1, and “Reset” restores the default view (live customers / all
+  tickets, page 1, no search).
+- Pagination is server-side (`page`/`limit`/`total`); the shared `Pagination`
+  component only reports intent. Page size is 20 (the backend maximum is 50).
+- No client-side filtering substitutes for a server filter, and no list is
+  cached between pages.
+
+### Mutations
+
+| Action | When it is offered | Endpoint |
+| --- | --- | --- |
+| Create customer | `customer.create` (owner/admin) | `POST …/customers` |
+| Edit customer | `customer.update` (owner/admin) | `PATCH …/customers/:id` |
+| Archive customer | `customer.update`, live customers only | `PATCH …/customers/:id/archive` |
+| Restore customer | `customer.update`, archived rows only | `PATCH …/customers/:id/restore` |
+| Change status | `ticket.update` **and** the assignment cap | `PATCH …/tickets/:id/status` |
+| Change priority | same | `PATCH …/tickets/:id/priority` |
+| Resolve (with optional note) | same | `POST …/tickets/:id/resolve` |
+| Reopen | same, status ≠ `OPEN` | `POST …/tickets/:id/reopen` |
+
+Rules applied to every mutation: the existing client only, local validation
+first, a pending state that disables the control (duplicate submits are also
+guarded in the handler), status-only error copy, a success toast, and a server
+refetch of the affected record/list. There is **no** optimistic update and no
+local mutation of server data.
+
+Status options are exactly `TICKET_STATUS_TRANSITIONS[current]`; `RESOLVED` is
+reached through the resolve action so a resolution note can be recorded, and an
+invalid move still surfaces as a 409.
+
+### Permissions and assignment
+
+`features/access/workspace-permissions.ts` mirrors the server's RBAC registry
+**for affordances only** — it decides which controls render, never what is
+authorized. `canModifyTicket` mirrors `evaluateResourceModification(...,
+{ allowCreator: true })`: owners/admins triage any ticket, agents only tickets
+assigned to them or opened by them, viewers never mutate. The server re-checks
+on every request and is what actually enforces it.
+
+**Assignment is display-only.** The ticket DTO carries `agentId` only and this
+backend release has no member-directory route (`workspace.members.list` is a
+reserved permission with no endpoint), so a picker could not be populated with
+valid workspace members. The UI shows “Unassigned” or `Agent #<id suffix>`
+(with the full id in the title) and documents the gap instead of inventing
+members. `PATCH …/tickets/:id/assignment` exists but is not exposed.
+
+**Internal notes are not implemented.** Conversation/message endpoints exist,
+but the support inbox and message composer belong to Prompt 23. No note is
+written into a public field, and no conversation data is rendered here.
+
+### Tenant safety and states
+
+`useCustomers` / `useTickets` / `useCustomerDetail` / `useTicketDetail` follow
+the Prompt 21 pattern:
+
+- keyed on `workspaceId` plus the normalized query (primitives, so an unchanged
+  query keeps a stable identity);
+- a workspace or filter change clears the previous rows **synchronously** (a
+  scope guard in the hook return prevents one frame of another tenant's data);
+- a request sequence accepts a response only while it is still the latest, so a
+  slow previous workspace/page can never overwrite the current one;
+- superseded requests are aborted (`AbortController`) as an optimization;
+- a same-scope refresh keeps the current rows visible; a scope change shows
+  skeletons.
+
+Malformed ids are rejected locally (`invalid`) without a request; unknown or
+foreign ids resolve to the server's tenant-scoped 404 (`not-found`).
+
+States: skeleton loading, “No customers/tickets yet” vs “No … match” empty
+states with a filter reset, retryable `ErrorState`, and a non-retryable
+403 surface (“Customers/Tickets access required”). Error copy is status-derived;
+response bodies and request ids are never rendered.
+
+### Rendering and motion
+
+Descriptions, resolution notes, names and tags are rendered as text nodes
+(`whitespace-pre-wrap`), never as HTML. Motion uses the existing Framer Motion
+dependency: the shared `PageTransition` for page and list swaps (keyed on the
+query), a short fade/rise on the customer dialog body, and CSS hover/focus
+transitions elsewhere. `useReducedMotion` is honoured, and forms, navigation and
+focus handling are unaffected by animation.
+
+---
+
+## 12. API client
 
 `services/http-client.service.ts` is the only module that calls `fetch`.
 
@@ -569,7 +716,7 @@ thin typed wrappers; components never build URLs.
 
 ---
 
-## 12. State management
+## 13. State management
 
 | State | Where | Why |
 | --- | --- | --- |
@@ -590,7 +737,7 @@ API does not change.
 
 ---
 
-## 13. Responsive & accessibility conventions
+## 14. Responsive & accessibility conventions
 
 - Mobile-first utility classes; breakpoints used: `sm`, `md`, `lg`.
 - Every interactive control is a real `button`/`a`/`input` with an accessible
@@ -607,7 +754,7 @@ API does not change.
 
 ---
 
-## 14. Tests
+## 15. Tests
 
 ```bash
 npm run test --workspace client      # vitest run
@@ -617,7 +764,7 @@ npm run test:watch --workspace client
 Configuration: `client/vitest.config.ts` (jsdom, React plugin, `@` alias,
 `src/test/setup.ts`). Tests live next to the code as `*.test.ts(x)`.
 
-Covered today (125 tests, 28 files):
+Covered today (187 tests, 36 files):
 
 - `Button` — label, variants, loading/disabled, click, keyboard activation.
 - `Modal` — portal/ARIA, focus in, Escape, close button, Tab containment.
@@ -659,6 +806,25 @@ Covered today (125 tests, 28 files):
   refresh, workspace switch without stale values.
 - `TicketTrendChart` — series/total rendering, all-zero empty state, keyboard
   bucket inspection.
+- Customer/ticket services — path + query construction, id encoding, abort
+  signal forwarding, nullable patch fields, status/priority/resolve/reopen
+  payloads.
+- Customer form model — required/format validation, tag parsing and bounds,
+  create payload trimming/omission, patch diffing with explicit `null` clears.
+- `useCustomers` — first-page query, no-workspace no-op, immediate tenant clear
+  and stale-response rejection across a workspace switch, 403 mapping, refresh.
+- `CustomersPage` — API rows, loading, empty, retryable error, 403, role-gated
+  creation, debounced search, status/archive filters, server pagination,
+  restore, creation + refetch.
+- `CustomerDetailPage` — profile/metadata/related-ticket rendering, malformed
+  id, not found, role-gated actions, changed-fields-only patch + refetch,
+  archive confirmation + navigation, retry.
+- `TicketsPage` — rows and assignee fallback, loading, empty, retryable error,
+  403, debounced search, status/priority filters, reset, pagination, refresh.
+- `TicketDetailPage` — ticket + linked customer, allowed transition options,
+  status/priority mutations, resolve note, reopen, 409 copy, viewer and
+  non-assigned-agent read-only states, assigned-agent controls, malformed id,
+  not found.
 - Theme utilities — resolution and DOM application.
 
 Not covered: pixel-level visual regressions, and automated end-to-end tests of
@@ -668,7 +834,7 @@ actual Prompt 18 endpoints and real ticket records.
 
 ---
 
-## 15. Extending the frontend (Prompts 22–25)
+## 16. Extending the frontend (Prompts 23–25)
 
 1. **Add the route** in `route-paths.ts`, the page in `features/<domain>/pages/`
    and a child route under `AppLayout` (`lazy()`), then enable the nav entry.
@@ -689,7 +855,7 @@ actual Prompt 18 endpoints and real ticket records.
 
 ---
 
-## 16. Known limitations
+## 17. Known limitations
 
 - **Signup and email-verification screens are not implemented.** The backend
   supports `POST /auth/register` and `POST /auth/verify-email`; no UI was built
@@ -717,9 +883,31 @@ actual Prompt 18 endpoints and real ticket records.
   workspace timezone string is not used for bucketing (server limitation).
 - **Workspace settings/rename UI is not included** (the `PATCH /workspaces/:id`
   backend route exists; settings screens belong to a later prompt).
-- **No route exists yet for tickets/conversations/customers/KB/settings or a
-  separate analytics report page**; their nav entries are `aria-disabled` so
-  nothing 404s. The analytics *dashboard* is `/dashboard`, not `/analytics`.
+- **Conversations, escalations, knowledge base, AI, settings and a separate
+  analytics report page have no routes yet**; their nav entries are
+  `aria-disabled` so nothing 404s. Customers and tickets are live at
+  `/customers` and `/tickets`; the analytics *dashboard* is `/dashboard`.
+- **No ticket-creation form.** `POST …/tickets` exists and is permitted for
+  owner/admin/agent, but Prompt 22 scopes the ticket UI to listing, detail and
+  the status/priority/resolve/reopen actions. Ticket editing (subject,
+  description, category, tags, due date) is likewise not exposed although
+  `PATCH …/tickets/:id` supports it.
+- **Ticket assignment is not editable.** No member-directory endpoint exists to
+  populate valid assignees, so the UI only displays the assignee reference.
+- **No ticket history/audit timeline.** Audit entries are written by the
+  backend, but no read endpoint exposes them; inventing events is not an option
+  and reading internal audit data would bypass permission boundaries.
+- **Customer deletion is archival.** The backend has no hard delete; “Archive”
+  is a soft delete with a restore path, and archived customers are reachable
+  through the archive filter rather than the detail route (which 404s them).
+- **Customer `metadata` is read-only.** The API accepts a key/value bag, but an
+  arbitrary metadata editor is outside Prompt 22's scope; the detail page shows
+  the stored keys.
+- **Internal notes and conversations are absent by design** (Prompt 23 owns the
+  inbox/chat UI). No message is sent from these screens.
+- **Related tickets are capped** at the five most recent with the API's total
+  shown; the ticket list itself has no customer column because the DTO carries
+  only `customerId` and there is no batch customer lookup.
 - **Notification bell is read-only** — it shows the caller’s real unread count
   but the inbox route ships later.
 - **No React Query / server cache**; each surface fetches what it renders.
