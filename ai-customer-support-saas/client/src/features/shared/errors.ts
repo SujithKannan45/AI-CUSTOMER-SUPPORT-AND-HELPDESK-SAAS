@@ -9,7 +9,14 @@ import { HttpApiError } from '@/services/http-client.service';
  * controls (see `fieldErrorsFrom`).
  */
 
-export type ReadResource = 'customers' | 'customer' | 'tickets' | 'ticket';
+export type ReadResource =
+  | 'customers'
+  | 'customer'
+  | 'tickets'
+  | 'ticket'
+  | 'inbox'
+  | 'conversation'
+  | 'messages';
 
 export interface ReadErrorCopy {
   readonly message: string;
@@ -27,6 +34,12 @@ const FORBIDDEN: Record<ReadResource, string> = {
     'Support tickets are not available to your role in this workspace. Ask a workspace administrator for access.',
   ticket:
     'Support tickets are not available to your role in this workspace. Ask a workspace administrator for access.',
+  inbox:
+    'Conversations are not available to your role in this workspace. Ask a workspace administrator for access.',
+  conversation:
+    'Conversations are not available to your role in this workspace. Ask a workspace administrator for access.',
+  messages:
+    'Messages are not available to your role in this workspace. Ask a workspace administrator for access.',
 };
 
 const NOT_FOUND: Record<ReadResource, string> = {
@@ -34,6 +47,10 @@ const NOT_FOUND: Record<ReadResource, string> = {
   customer: 'This customer does not exist in the current workspace, or was archived.',
   tickets: 'This workspace could not be found or is no longer available to your account.',
   ticket: 'This ticket does not exist in the current workspace, or was archived.',
+  inbox: 'This workspace could not be found or is no longer available to your account.',
+  conversation:
+    'This conversation does not exist in the current workspace, or its ticket was archived.',
+  messages: 'This conversation does not exist in the current workspace, or its ticket was archived.',
 };
 
 export function describeReadError(error: unknown, resource: ReadResource): ReadErrorCopy {

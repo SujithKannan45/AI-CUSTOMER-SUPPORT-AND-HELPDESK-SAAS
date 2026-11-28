@@ -18,12 +18,30 @@ export type UiPermission =
   | 'customer.update'
   | 'ticket.create'
   | 'ticket.update'
-  | 'ticket.assign';
+  | 'ticket.assign'
+  | 'conversation.reply'
+  | 'analytics.view';
 
 const ROLE_GRANTS: { readonly [K in WorkspaceRole]: readonly UiPermission[] } = {
-  owner: ['customer.create', 'customer.update', 'ticket.create', 'ticket.update', 'ticket.assign'],
-  admin: ['customer.create', 'customer.update', 'ticket.create', 'ticket.update', 'ticket.assign'],
-  agent: ['ticket.create', 'ticket.update'],
+  owner: [
+    'customer.create',
+    'customer.update',
+    'ticket.create',
+    'ticket.update',
+    'ticket.assign',
+    'conversation.reply',
+    'analytics.view',
+  ],
+  admin: [
+    'customer.create',
+    'customer.update',
+    'ticket.create',
+    'ticket.update',
+    'ticket.assign',
+    'conversation.reply',
+    'analytics.view',
+  ],
+  agent: ['ticket.create', 'ticket.update', 'conversation.reply'],
   viewer: [],
 };
 
@@ -54,6 +72,26 @@ export function canModifyTicket(
   if (role === null) return false;
   if (role === 'owner' || role === 'admin') return true;
   if (!roleCan(role, 'ticket.update')) return false;
+  if (userId === null) return false;
+  return ticket.agentId === userId || ticket.createdById === userId;
+}
+
+/**
+ * Mirrors the conversation service's send rule: `conversation.reply` plus the
+ * same assignment cap as tickets (`evaluateResourceModification(...
+ * { allowCreator: true })`) evaluated against the CONVERSATION'S ticket, which
+ * the server loads and re-checks on every send. Owners/admins may reply on any
+ * ticket; agents only on tickets assigned to them or opened by them; viewers
+ * hold no reply permission at all.
+ */
+export function canReplyToConversation(
+  role: WorkspaceRole | null,
+  userId: string | null,
+  ticket: TicketModificationInput,
+): boolean {
+  if (role === null) return false;
+  if (role === 'owner' || role === 'admin') return true;
+  if (!roleCan(role, 'conversation.reply')) return false;
   if (userId === null) return false;
   return ticket.agentId === userId || ticket.createdById === userId;
 }

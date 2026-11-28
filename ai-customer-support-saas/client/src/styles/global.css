@@ -219,6 +219,59 @@
   z-index: var(--z-tooltip);
 }
 
+/*
+ * Motion primitives for the app shell (page entrance) and every dialog.
+ *
+ * These are deliberately CSS keyframes, not a runtime animation library: the
+ * shell and its dialogs render on first paint, so an animation engine imported
+ * here would land in the entry bundle for two short fades. The durations and
+ * easing match the shared motion tokens, and the reduced-motion block below
+ * collapses them to ~0ms while keeping the final state (`animation-fill-mode:
+ * both`), so nothing depends on an animation completing.
+ */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes dialog-overlay-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-panel-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@utility animate-page-enter {
+  animation: page-enter 200ms var(--ease-standard) both;
+}
+
+@utility animate-dialog-overlay-enter {
+  animation: dialog-overlay-enter 160ms var(--ease-standard) both;
+}
+
+@utility animate-dialog-panel-enter {
+  animation: dialog-panel-enter 160ms var(--ease-standard) both;
+}
+
 /* Honour the user's motion preference globally (animations are decorative). */
 @media (prefers-reduced-motion: reduce) {
   html {

@@ -16,6 +16,7 @@ export const ROUTES = {
   tickets: '/tickets',
   /** Route pattern; build real links with `ticketPath()`. */
   ticketDetail: '/tickets/:ticketId',
+  inbox: '/inbox',
 } as const;
 
 export type AppRoute = (typeof ROUTES)[keyof typeof ROUTES];

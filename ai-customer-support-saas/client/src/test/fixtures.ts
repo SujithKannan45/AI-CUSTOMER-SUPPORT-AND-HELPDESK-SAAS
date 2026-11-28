@@ -5,6 +5,12 @@ import type {
   CustomerDto,
   CustomerListPayload,
 } from '@/features/customers/types';
+import type {
+  ConversationDto,
+  ConversationListPayload,
+  MessageDto,
+  MessageListPayload,
+} from '@/features/inbox/types';
 import type { TicketDto, TicketListPayload } from '@/features/tickets/types';
 import type { WorkspaceListItem, WorkspaceRole } from '@/features/workspace/types';
 import { useWorkspaceStore } from '@/features/workspace/workspace.store';
@@ -274,6 +280,71 @@ export function makeTicketList(
   overrides: Partial<Omit<TicketListPayload, 'items'>> = {},
 ): TicketListPayload {
   const limit = overrides.limit ?? 20;
+  return {
+    items,
+    page: overrides.page ?? 1,
+    limit,
+    total: overrides.total ?? items.length,
+    hasMore: overrides.hasMore ?? false,
+  };
+}
+
+export const TEST_CONVERSATION_ID = '507f1f77bcf86cd799439041';
+export const TEST_SECOND_CONVERSATION_ID = '507f1f77bcf86cd799439042';
+export const TEST_MESSAGE_ID = '507f1f77bcf86cd799439051';
+export const TEST_SECOND_MESSAGE_ID = '507f1f77bcf86cd799439052';
+
+export function makeConversation(overrides: Partial<ConversationDto> = {}): ConversationDto {
+  return {
+    id: TEST_CONVERSATION_ID,
+    workspaceId: '507f1f77bcf86cd799439012',
+    ticketId: TEST_TICKET_ID,
+    customerId: TEST_CUSTOMER_ID,
+    subject: 'Invoice shows the wrong total',
+    isPrimary: true,
+    lastMessageAt: '2026-09-06T11:30:00.000Z',
+    lastMessageById: null,
+    createdAt: '2026-09-05T10:05:00.000Z',
+    updatedAt: '2026-09-06T11:30:00.000Z',
+    ...overrides,
+  };
+}
+
+export function makeConversationList(
+  items: readonly ConversationDto[] = [makeConversation()],
+  overrides: Partial<Omit<ConversationListPayload, 'items'>> = {},
+): ConversationListPayload {
+  return {
+    items,
+    page: overrides.page ?? 1,
+    limit: overrides.limit ?? 20,
+    total: overrides.total ?? items.length,
+    hasMore: overrides.hasMore ?? false,
+  };
+}
+
+export function makeMessage(overrides: Partial<MessageDto> = {}): MessageDto {
+  return {
+    id: TEST_MESSAGE_ID,
+    workspaceId: '507f1f77bcf86cd799439012',
+    conversationId: TEST_CONVERSATION_ID,
+    ticketId: TEST_TICKET_ID,
+    senderId: '507f1f77bcf86cd799439031',
+    senderType: 'AGENT',
+    body: 'Thanks for reaching out — checking the invoice now.',
+    visibility: 'PUBLIC',
+    attachments: [],
+    createdAt: '2026-09-05T10:10:00.000Z',
+    updatedAt: '2026-09-05T10:10:00.000Z',
+    ...overrides,
+  };
+}
+
+export function makeMessageList(
+  items: readonly MessageDto[] = [makeMessage()],
+  overrides: Partial<Omit<MessageListPayload, 'items'>> = {},
+): MessageListPayload {
+  const limit = overrides.limit ?? 50;
   return {
     items,
     page: overrides.page ?? 1,

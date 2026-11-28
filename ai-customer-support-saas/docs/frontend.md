@@ -51,7 +51,7 @@ client/
     │   └── routes/             # route-paths (single source for path strings)
     ├── components/
     │   ├── ui/                 # design system (see §4)
-    │   ├── common/             # page-header, page-transition
+    │   ├── common/             # page-header, page-transition, motion presets
     │   ├── navigation/         # breadcrumbs
     │   └── feedback/           # states, spinner, error-boundary
     ├── config/env.config.ts    # the only reader of import.meta.env
@@ -62,6 +62,8 @@ client/
     │   ├── analytics/          # Prompt 21 types, service, date model, hook, charts
     │   ├── customers/          # Prompt 22 types, service, form model, hooks, components
     │   ├── tickets/            # Prompt 22 types, service, hooks, components
+    │   ├── inbox/              # Prompt 23 conversations/messages: types, service,
+    │   │                       # realtime-status seam, hooks, list/panel/composer
     │   ├── access/             # UI-only mirror of the RBAC registry (affordances)
     │   ├── shared/             # cross-feature error copy + field-error mapping
     │   ├── dashboard/          # foundation-only dashboard components
@@ -69,7 +71,8 @@ client/
     ├── hooks/                  # use-debounce, use-media-query, use-theme, use-toast
     ├── layouts/                # app-layout + sidebar/header/workspace-switcher/…
     ├── pages/                  # login, reset-password, workspace picker, dashboard,
-    │                           # customers/customer detail, tickets/ticket detail, 404
+    │                           # customers/customer detail, tickets/ticket detail,
+    │                           # inbox, 404
     ├── services/               # http-client, auth-token store, health
     ├── store/                  # ui.store (sidebar + theme preference)
     ├── styles/global.css       # design tokens, base layer, z-index utilities
@@ -256,6 +259,7 @@ container.
 | `/customers/:customerId` | session + workspace | customer detail; a malformed id renders a local invalid-link state without a request |
 | `/tickets` | session + workspace | ticket list (server-side search, status/priority filter, pagination) |
 | `/tickets/:ticketId` | session + workspace | ticket detail with the supported status/priority/resolve/reopen actions |
+| `/inbox` | session + workspace | support inbox: ticket-indexed conversation list + message thread + composer (Prompt 23) |
 | `*` | session + workspace | not-found page inside the shell |
 
 `RequireAuth` (`app/guards/require-auth.tsx`):
@@ -357,7 +361,7 @@ The backend really implements recovery, so the UI does too:
   server's password policy (8–128 chars, letter + digit) and confirmation
   match. On success it returns to `/login` with a one-time success notice.
 - Registration and email verification screens are **not** part of Prompt 20
-  (see §17).
+  (see §18).
 
 ### Session lifecycle
 
@@ -496,7 +500,7 @@ the three reads with `Promise.all` and has no cache library:
 There is still no React Query: the dashboard is the only server-data surface
 with overlapping-request risk today, and the sequence guard plus typed service
 covers it without a new dependency. When ticket/inbox lists land, revisit that
-decision centrally (see §13).
+decision centrally (see §14).
 
 ### Date ranges
 
@@ -676,15 +680,151 @@ response bodies and request ids are never rendered.
 ### Rendering and motion
 
 Descriptions, resolution notes, names and tags are rendered as text nodes
-(`whitespace-pre-wrap`), never as HTML. Motion uses the existing Framer Motion
-dependency: the shared `PageTransition` for page and list swaps (keyed on the
-query), a short fade/rise on the customer dialog body, and CSS hover/focus
-transitions elsewhere. `useReducedMotion` is honoured, and forms, navigation and
-focus handling are unaffected by animation.
+(`whitespace-pre-wrap`), never as HTML. Motion is CSS: the shared
+`PageTransition` (`animate-page-enter`), the dialog scrim/panel
+(`animate-dialog-overlay-enter` / `animate-dialog-panel-enter`) and the customer
+dialog body all use the keyframes in `styles/global.css`, with CSS hover/focus
+transitions elsewhere. The global `prefers-reduced-motion: reduce` rule
+collapses those animations to ~0 ms while `animation-fill-mode: both` keeps the
+final state, so forms, navigation and focus handling never depend on one.
+Framer Motion is loaded only by the inbox route (see §12), which keeps the entry
+bundle free of an animation engine.
 
 ---
 
-## 12. API client
+## 12. Support inbox (Prompt 23)
+
+### Routes and components
+
+| Route | Page | Components |
+| --- | --- | --- |
+| `/inbox` | `pages/inbox.page.tsx` | `InboxFilters`, `ConversationList`, `ConversationPanel` → `ConversationHeader`, `MessageList`, `MessageComposer` |
+
+The sidebar entry **Inbox** (`layouts/components/nav-items.ts`) replaced the
+disabled `/conversations` placeholder. Selection is page state (not a route
+parameter), cleared synchronously when the workspace changes.
+
+### Backend contract actually consumed
+
+| Call | Endpoint | Used for |
+| --- | --- | --- |
+| thread index | `GET …/tickets?sort=updatedAt&order=desc&page&limit&search&status&priority` | the conversation list (one conversation per ticket) |
+| thread | `GET …/tickets/:ticketId/conversations?page=1&limit=1` | resolving the ticket's single primary conversation |
+| start | `POST …/tickets/:ticketId/conversations` (body `{}`) | materialising a conversation for a ticket that has none |
+| messages | `GET …/conversations/:id/messages?page&limit` | chronological thread page (server max `limit=50`) |
+| send | `POST …/conversations/:id/messages` with `{ body, visibility }` | public reply or internal note |
+
+**There is no workspace-wide conversation listing endpoint.** Conversations are
+read per ticket (unique `{workspaceId, ticketId}` index, at most one item), so
+the index is built from the workspace's tickets. Consequences, stated in the UI
+rather than papered over:
+
+- rows show the ticket's real **subject, number, status, priority, assignee and
+  last activity**; the conversation DTO has no message preview, so no preview is
+  rendered;
+- conversations have **no lifecycle of their own** (no status, assignee, unread
+  flag or archive), so none is displayed — the ticket's state is the state of
+  the thread, and the ticket page owns those actions;
+- deep pagination of "all conversations" is ticket pagination (`page`/`limit`,
+  20 per page).
+
+### Counts (tickets vs conversations)
+
+The index paginates **tickets**, and a ticket has at most one conversation and
+may have none until one is started, so the list's `total` is a ticket count and
+is labelled as such (`Pagination itemLabel="tickets"`). The workspace's real
+conversation total is read from the existing analytics overview
+(`GET …/analytics/overview?range=30d` → `conversations.total`, computed over
+live tickets and not limited to the window) by
+`features/inbox/use-conversation-total.ts` and shown beside it, e.g.
+`3 tickets · 2 conversations in this workspace`.
+
+That endpoint requires `analytics.view`, which the RBAC registry grants to
+owner/admin only. Roles without it see *“Conversation total requires workspace
+analytics access”* instead of a number, and a failed request says *“Conversation
+total unavailable right now”* — the page never substitutes the ticket count for
+a conversation count and never estimates one client-side. The total is re-read
+when a conversation is created (after `POST …/tickets/:id/conversations`) or a
+message is sent. No conversation-count endpoint was added to the backend.
+
+### Data flow
+
+```
+InboxPage ─ useTickets(sort=updatedAt) ─→ GET /tickets
+   │ selected ticket id
+   └─ ConversationPanel
+        ├─ useTicketConversation ─→ GET /tickets/:id/conversations
+        ├─ useConversationMessages ─→ GET /conversations/:id/messages
+        └─ MessageComposer ─→ POST /conversations/:id/messages
+```
+
+`useConversationMessages` reads page 1 only to learn `total`, then requests the
+**last** page so a chat opens at its newest messages; "Load earlier messages"
+walks backwards a page at a time and prepends. Sent messages are appended from
+the server's own `{ message }` payload, id-deduplicated and re-sorted, so a
+refresh can never duplicate one.
+
+### Permissions
+
+- Reads: `conversation.view` (all four roles). Sends: `conversation.reply`
+  (owner/admin/agent) **plus** the ticket assignment cap — agents may only send
+  on tickets assigned to them or opened by them.
+- `features/access/workspace-permissions.ts` mirrors that rule
+  (`canReplyToConversation`) purely to decide whether the composer renders; the
+  server re-evaluates it on every send and answers 403 otherwise.
+- A viewer sees the thread with a read-only explanation and no composer. An
+  agent outside the cap sees the same, with the assignment reason.
+- Internal notes (`visibility: INTERNAL`) are staff-only by construction: the
+  server excludes them inside the message query for roles without
+  `conversation.reply`, and 403s a direct read. The composer sends the mode the
+  agent selected; it never relabels a note as a public reply.
+
+### Real-time status
+
+**Not implemented — the backend has no socket transport.** Verified rather than
+assumed: `server/package.json` has no `socket.io`, `server.ts` never creates a
+server instance, and `server/src/sockets/` contains only `README.md` (planned
+structure). The backend does publish a body-free `conversation.message_created`
+event on a module-local bus after persistence, but nothing bridges it to a
+socket. The inbox therefore opens no socket, does not poll, and states the
+limitation next to the page title with a manual **Refresh** button (page-level
+for the list, thread-level for messages). `features/inbox/realtime-status.ts`
+is the single seam documenting availability and the backend work outstanding.
+
+### Motion and bundle cost
+
+`components/common/motion.ts` holds the shared presets (`STANDARD_EASE` =
+`--ease-standard`, 160–200 ms transitions) and the variants used *only* by this
+route: conversation rows stagger in (capped at 8 × 15 ms) and message bubbles
+fade/rise with `AnimatePresence` — that presence behaviour is kept, so a message
+removed by a refresh still animates out. Every animated component reads
+`useReducedMotion()` and renders the static variant when the OS asks for reduced
+motion; selection, sending and navigation are never communicated by motion
+alone (`aria-current`, text, focus rings carry the meaning).
+
+Framer Motion is imported by exactly the two components that need
+`AnimatePresence`/variants (`conversation-list.tsx`, `message-list.tsx`), both
+inside the lazily loaded `/inbox` page, plus the type-only presets module. The
+shell (`PageTransition`) and every dialog use CSS keyframes instead, so the
+library is a route chunk rather than entry-bundle weight: the production entry
+chunk fell from 538.86 kB (172.73 kB gzip) to 415.16 kB (131.20 kB gzip), and
+`inbox.page` carries the 124 kB (40 kB gzip) library for the route that uses it.
+No animation dependency was added or removed.
+
+### Known gaps (inbox)
+
+- No conversation-level read state, assignment, status or archive exists in the
+  backend, so no such control is offered.
+- No message preview in the list (no preview field in the DTO).
+- No message editing/deletion UI (the backend has a sender-only body edit and no
+  delete).
+- No attachment upload (the API accepts no attachments; references are rendered
+  when present).
+- No cross-conversation message search UI (search is conversation-scoped).
+
+---
+
+## 13. API client
 
 `services/http-client.service.ts` is the only module that calls `fetch`.
 
@@ -716,7 +856,7 @@ thin typed wrappers; components never build URLs.
 
 ---
 
-## 13. State management
+## 14. State management
 
 | State | Where | Why |
 | --- | --- | --- |
@@ -737,7 +877,7 @@ API does not change.
 
 ---
 
-## 14. Responsive & accessibility conventions
+## 15. Responsive & accessibility conventions
 
 - Mobile-first utility classes; breakpoints used: `sm`, `md`, `lg`.
 - Every interactive control is a real `button`/`a`/`input` with an accessible
@@ -754,7 +894,7 @@ API does not change.
 
 ---
 
-## 15. Tests
+## 16. Tests
 
 ```bash
 npm run test --workspace client      # vitest run
@@ -764,7 +904,7 @@ npm run test:watch --workspace client
 Configuration: `client/vitest.config.ts` (jsdom, React plugin, `@` alias,
 `src/test/setup.ts`). Tests live next to the code as `*.test.ts(x)`.
 
-Covered today (187 tests, 36 files):
+Covered today (238 tests, 41 files):
 
 - `Button` — label, variants, loading/disabled, click, keyboard activation.
 - `Modal` — portal/ARIA, focus in, Escape, close button, Tab containment.
@@ -825,6 +965,25 @@ Covered today (187 tests, 36 files):
   status/priority mutations, resolve note, reopen, 409 copy, viewer and
   non-assigned-agent read-only states, assigned-agent controls, malformed id,
   not found.
+- Inbox service — ticket-scoped conversation read, get-or-create body, message
+  list query (page/limit/search), send payload containing only body +
+  visibility, id encoding.
+- `useConversationMessages` — newest-page opening for long threads, earlier-page
+  prepend with stable ordering, stale rejection across a workspace switch,
+  malformed id, 403 mapping, id-deduplicated append.
+- `MessageComposer` — empty/whitespace validation, trimmed send, draft kept on
+  failure with status-derived copy, 404 copy, duplicate-submit guard, internal
+  mode with staff-only banner, Ctrl/⌘+Enter vs Enter, length cap, read-only
+  state.
+- `MessageList` — sender labels, timestamps, internal-note labelling,
+  attachment references, earlier-page control, empty state, reduced-motion
+  render.
+- `InboxPage` — rows from the API (status/priority/assignee), loading, empty,
+  retryable error, 403, conversation selection + thread load, back navigation,
+  starting a missing conversation, public reply and internal note against the
+  API, failed send keeping the draft, viewer and non-assigned-agent read-only
+  states, server-side search/filters, pagination clearing the selection,
+  workspace switch dropping the selected thread, header ticket/customer links.
 - Theme utilities — resolution and DOM application.
 
 Not covered: pixel-level visual regressions, and automated end-to-end tests of
@@ -834,7 +993,7 @@ actual Prompt 18 endpoints and real ticket records.
 
 ---
 
-## 16. Extending the frontend (Prompts 23–25)
+## 17. Extending the frontend (Prompts 24–25)
 
 1. **Add the route** in `route-paths.ts`, the page in `features/<domain>/pages/`
    and a child route under `AppLayout` (`lazy()`), then enable the nav entry.
@@ -855,7 +1014,7 @@ actual Prompt 18 endpoints and real ticket records.
 
 ---
 
-## 17. Known limitations
+## 18. Known limitations
 
 - **Signup and email-verification screens are not implemented.** The backend
   supports `POST /auth/register` and `POST /auth/verify-email`; no UI was built
@@ -883,10 +1042,10 @@ actual Prompt 18 endpoints and real ticket records.
   workspace timezone string is not used for bucketing (server limitation).
 - **Workspace settings/rename UI is not included** (the `PATCH /workspaces/:id`
   backend route exists; settings screens belong to a later prompt).
-- **Conversations, escalations, knowledge base, AI, settings and a separate
-  analytics report page have no routes yet**; their nav entries are
-  `aria-disabled` so nothing 404s. Customers and tickets are live at
-  `/customers` and `/tickets`; the analytics *dashboard* is `/dashboard`.
+- **Escalations, knowledge base, AI, settings and a separate analytics report
+  page have no routes yet**; their nav entries are `aria-disabled` so nothing
+  404s. Customers, tickets and the conversation inbox are live at `/customers`,
+  `/tickets` and `/inbox`; the analytics *dashboard* is `/dashboard`.
 - **No ticket-creation form.** `POST …/tickets` exists and is permitted for
   owner/admin/agent, but Prompt 22 scopes the ticket UI to listing, detail and
   the status/priority/resolve/reopen actions. Ticket editing (subject,
@@ -903,15 +1062,31 @@ actual Prompt 18 endpoints and real ticket records.
 - **Customer `metadata` is read-only.** The API accepts a key/value bag, but an
   arbitrary metadata editor is outside Prompt 22's scope; the detail page shows
   the stored keys.
-- **Internal notes and conversations are absent by design** (Prompt 23 owns the
-  inbox/chat UI). No message is sent from these screens.
+- **Ticket screens send no messages.** Messaging lives in the inbox (§12); the
+  ticket detail links there instead of duplicating the composer.
 - **Related tickets are capped** at the five most recent with the API's total
   shown; the ticket list itself has no customer column because the DTO carries
   only `customerId` and there is no batch customer lookup.
-- **Notification bell is read-only** — it shows the caller’s real unread count
-  but the inbox route ships later.
+- **The notification bell is read-only** — it shows the caller’s real unread
+  count; there is no notification-centre route yet (the `/inbox` route is the
+  conversation inbox, not the notification feed).
 - **No React Query / server cache**; each surface fetches what it renders.
-- **No Socket.IO client**; the real-time phase will add it behind a service.
+- **No real-time messaging.** The backend ships no Socket.IO server (verified:
+  no dependency, no server instance, `sockets/` is a README), so the inbox uses
+  REST only, states the limitation in the UI and offers manual refresh instead
+  of polling. See §12 and `docs/architecture.md`.
+- **Single-pane inbox below `lg`.** On mobile/tablet the list and the selected
+  thread swap (with a back control) instead of sitting side by side; that is the
+  intended responsive behaviour, not a missing feature.
+- **Conversation-level actions do not exist in the backend** — no read state,
+  assignment, status or archive per conversation, so the inbox shows the
+  ticket's state and links to the ticket page for lifecycle actions.
+- **No message preview in the conversation list** (the DTO has no preview
+  field), no message editing/deletion UI, no attachment upload, and message
+  search is conversation-scoped only.
+- **Viewer/agent read-only inbox states were unit-tested, not browser-tested** —
+  the development seed contains no viewer account, so the 403 and read-only
+  browser paths stay unverified.
 - **No visual/browser regression tests**; verification is typecheck, lint,
   unit tests and a production build.
 - `workspace.settings.timezone` is a free-form server string, so the UI shows

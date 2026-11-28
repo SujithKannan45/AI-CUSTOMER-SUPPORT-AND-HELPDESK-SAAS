@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { describeReadError } from '@/features/shared/errors';
 import { ticketService } from './ticket.service';
-import type { TicketListPayload, TicketListQuery, TicketPriority, TicketStatus } from './types';
+import type {
+  TicketListPayload,
+  TicketListQuery,
+  TicketPriority,
+  TicketSortField,
+  TicketStatus,
+} from './types';
 
 export type TicketListStatus = 'idle' | 'loading' | 'refreshing' | 'ready' | 'error';
 
@@ -12,6 +18,9 @@ export interface TicketListFilters {
   readonly priority: TicketPriority | '';
   readonly page: number;
   readonly limit: number;
+  /** Server allowlist field; defaults to `createdAt` (newest tickets first). */
+  readonly sort?: TicketSortField;
+  readonly order?: 'asc' | 'desc';
 }
 
 export interface TicketListState {
@@ -45,8 +54,8 @@ function toQuery(filters: TicketListFilters): TicketListQuery {
   return {
     page: filters.page,
     limit: filters.limit,
-    sort: 'createdAt',
-    order: 'desc',
+    sort: filters.sort ?? 'createdAt',
+    order: filters.order ?? 'desc',
     ...(filters.search.length > 0 ? { search: filters.search } : {}),
     ...(filters.status !== '' ? { status: filters.status } : {}),
     ...(filters.priority !== '' ? { priority: filters.priority } : {}),
@@ -68,10 +77,10 @@ export function useTickets({
   readonly filters: TicketListFilters;
 }): TicketListState {
   // Memoized on primitive values so an unchanged query keeps a stable identity.
-  const { search, status, priority, page, limit } = filters;
+  const { search, status, priority, page, limit, sort, order } = filters;
   const query = useMemo(
-    () => toQuery({ search, status, priority, page, limit }),
-    [search, status, priority, page, limit],
+    () => toQuery({ search, status, priority, page, limit, sort, order }),
+    [search, status, priority, page, limit, sort, order],
   );
   const queryKey = JSON.stringify(query);
 

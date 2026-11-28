@@ -101,9 +101,21 @@ export function Modal({
 
   return createPortal(
     <div className="fixed inset-0 z-modal flex items-end justify-center sm:items-center sm:p-6">
+      {/*
+       * Entrance-only animation, shared by every dialog in the app. It is a CSS
+       * keyframe pair (`animate-dialog-*-enter` in global.css) rather than a
+       * framer-motion component: dialogs open on first paint, so importing an
+       * animation library here would put it in the entry bundle. The reduced
+       * motion preference collapses the animation to ~0ms globally, keeping the
+       * final state.
+       *
+       * There is deliberately no exit animation: the dialog unmounts as soon as
+       * `open` flips false, which is what returns focus and unlocks background
+       * scroll immediately (a delayed unmount would delay keyboard recovery).
+       */}
       <div
         aria-hidden
-        className="absolute inset-0 bg-overlay"
+        className="animate-dialog-overlay-enter absolute inset-0 bg-overlay"
         onMouseDown={closeOnOverlayClick ? onClose : undefined}
       />
       <div
@@ -114,6 +126,7 @@ export function Modal({
         aria-describedby={description !== undefined ? descriptionId : undefined}
         tabIndex={-1}
         className={cn(
+          'animate-dialog-panel-enter',
           'relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-border bg-surface shadow-modal outline-none sm:rounded-2xl',
           SIZES[size],
         )}

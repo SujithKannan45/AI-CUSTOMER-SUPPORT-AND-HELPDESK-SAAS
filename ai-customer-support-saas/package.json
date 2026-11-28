@@ -40,7 +40,8 @@
     "verify:notifications": "tsx scripts/verify-notifications.ts",
     "verify:search": "tsx scripts/verify-search.ts",
     "verify:analytics": "tsx scripts/verify-analytics.ts",
-    "seed:dev": "tsx scripts/seed-dev-data.ts"
+    "seed:dev": "tsx scripts/seed-dev-data.ts",
+    "verify:seed": "tsx scripts/verify-seed.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

@@ -38,7 +38,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     label: 'Support',
     items: [
       { to: ROUTES.tickets, label: 'Tickets', icon: Ticket, enabled: true },
-      { to: '/conversations', label: 'Conversations', icon: MessagesSquare, enabled: false },
+      { to: ROUTES.inbox, label: 'Inbox', icon: MessagesSquare, enabled: true },
       { to: ROUTES.customers, label: 'Customers', icon: Users, enabled: true },
       { to: '/escalations', label: 'Escalations', icon: AlertTriangle, enabled: false },
     ],

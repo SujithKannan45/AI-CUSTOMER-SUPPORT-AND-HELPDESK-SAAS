@@ -914,16 +914,58 @@ Zod schemas per module (`<feature>.validation.ts`) applied declaratively via
 `validate(schema, source)` at the route. Handlers receive parsed, typed data;
 Zod errors render as 422 with field errors through the central error pipeline.
 
-## Real-time (prepared)
+## Real-time (prepared, NOT implemented — verified in Prompt 23)
 
-Socket.IO attaches to the existing HTTP server (no second port). Notification
-fan-out is already behind a typed seam (`notification.publisher.ts`) and
-escalation fan-out behind `escalation.events.ts`; the socket layer registers a
-transport/publisher rather than changing feature services. Handshake JWT
-auth → `socket.data = { userId, workspaceId, role }`; rooms are
-`workspace:{id}` / `conversation:{id}`; a socket can only join rooms inside
-its workspace. Typed `ClientToServerEvents`/`ServerToClientEvents` shared with
-the client. Details: `server/src/sockets/README.md`.
+**Status: no transport exists.** Re-checked while building the inbox:
+`socket.io` is not in `server/package.json`, `server.ts` starts an HTTP server
+but never constructs a Socket.IO instance, and `server/src/sockets/` contains
+only `README.md` with the *planned* structure. The typed seams that do exist
+are server-local event buses that publish AFTER persistence:
+`notification.publisher.ts`, `escalation.events.ts` and
+`conversation.events.ts` (the last one emits IDs, sender type and visibility —
+never a message body). No subscriber forwards them to a socket.
+
+Consequence for the client (Prompt 23): the support inbox uses REST only, opens
+no socket connection, and does not poll. It surfaces the limitation in the UI
+(`client/src/features/inbox/realtime-status.ts`) with manual refresh, so no
+screen claims live updates.
+
+When implemented, the agreed design is unchanged: Socket.IO attaches to the
+existing HTTP server (no second port); handshake JWT auth → `socket.data = {
+userId, workspaceId, role }`; rooms are `workspace:{id}` / `conversation:{id}`;
+a socket may only join rooms inside its own workspace; typed
+`ClientToServerEvents`/`ServerToClientEvents` are shared with the client.
+Outstanding backend work before the client can subscribe:
+
+1. install `socket.io` and attach it to the existing `http.Server`;
+2. JWT handshake middleware that rejects anonymous connections;
+3. room authorization derived from the verified membership — never from a
+   client-supplied workspace/conversation id;
+4. bridge `conversationEventBus` → `conversation:{id}` rooms with body-free
+   payloads (message bodies stay in the REST read path);
+5. a shared event-type module the client can import.
+
+## Development seed (implemented)
+
+`npm run seed:dev` seeds two tenants, four accounts and five customers into a
+**localhost-only** database (the script refuses any other host). The
+implementation lives in `scripts/dev-seed.ts`; `scripts/seed-dev-data.ts` is
+the CLI wrapper and `scripts/verify-seed.ts` (`npm run verify:seed`) is its
+regression driver.
+
+Two defects shipped in the original seed and were fixed in Prompt 23:
+
+| Defect | Root cause | Fix |
+| --- | --- | --- |
+| `dev-password-123` did not authenticate | The seed stored a hard-coded bcrypt string that was not a hash of the documented password, so `verifyPassword()` could never match it. | The seed now hashes `DEV_PASSWORD` at run time with the auth module's own `hashPassword()` (bcrypt cost 12 — the same call registration uses). Existing rows whose hash does not verify are re-hashed. The plaintext is never persisted and auth code is untouched. |
+| `GET /workspaces` threw `Cannot read properties of undefined (reading 'toHexString')` | The seed upserted workspaces with `$setOnInsert: { name, slug, status }` and never set `ownerId`. `findOneAndUpdate` does not run `required` validators, so the required `ownerId` field was simply absent, and the workspace DTO mapping dereferenced it. | The owner account is upserted **first**, then the workspace is created with `ownerId`, then memberships. A guarded `updateOne` backfills `ownerId` on legacy documents only when it is missing/null, so a valid owner is never overwritten. |
+
+`verify:seed` runs the real seed twice against an isolated in-memory mongod,
+simulates both defects (unset `ownerId`, replace the hash), proves the re-seed
+repairs them, and then over real HTTP checks that the documented account logs
+in, a wrong password is rejected, `GET /workspaces` returns the owned workspace
+with a valid `ownerId`, the second tenant sees only its own workspace, and a
+foreign workspace id is concealed with 404. Result: 23/23 checks.
 
 ## Background jobs (prepared)
 

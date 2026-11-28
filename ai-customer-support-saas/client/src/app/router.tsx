@@ -26,6 +26,9 @@ const TicketsPage = lazy(() =>
 const TicketDetailPage = lazy(() =>
   import('@/pages/ticket-detail.page').then((module) => ({ default: module.TicketDetailPage })),
 );
+const InboxPage = lazy(() =>
+  import('@/pages/inbox.page').then((module) => ({ default: module.InboxPage })),
+);
 
 /**
  * Route map.
@@ -38,6 +41,8 @@ const TicketDetailPage = lazy(() =>
  * - `/customers` and `/tickets` (Prompt 22) are workspace-scoped: their pages
  *   read the active workspace from the store and the server re-authorizes every
  *   request.
+ * - `/inbox` (Prompt 23) is workspace-scoped too; its conversation selection is
+ *   page state that resets when the workspace changes.
  */
 const router = createBrowserRouter([
   { path: ROUTES.login, element: <LoginPage /> },
@@ -66,6 +71,7 @@ const router = createBrowserRouter([
       { path: 'customers/:customerId', element: <CustomerDetailPage /> },
       { path: 'tickets', element: <TicketsPage /> },
       { path: 'tickets/:ticketId', element: <TicketDetailPage /> },
+      { path: 'inbox', element: <InboxPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

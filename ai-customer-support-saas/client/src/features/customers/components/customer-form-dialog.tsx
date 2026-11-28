@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent, type JSX } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
@@ -53,7 +52,6 @@ export function CustomerFormDialog({
   onSaved,
 }: CustomerFormDialogProps): JSX.Element {
   const { toast } = useToast();
-  const prefersReducedMotion = useReducedMotion();
 
   const [values, setValues] = useState<CustomerFormValues>(EMPTY_CUSTOMER_FORM);
   const [errors, setErrors] = useState<CustomerFormErrors>({});
@@ -148,11 +146,7 @@ export function CustomerFormDialog({
         </>
       }
     >
-      <motion.div
-        initial={prefersReducedMotion === true ? false : { opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.18, ease: 'easeOut' }}
-      >
+      <div className="animate-page-enter">
         <form
           noValidate
           aria-busy={isSubmitting}
@@ -292,7 +286,7 @@ export function CustomerFormDialog({
             </p>
           ) : null}
         </form>
-      </motion.div>
+      </div>
     </Modal>
   );
 }
